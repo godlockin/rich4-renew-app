@@ -189,7 +189,7 @@
       let dead = 0, badRef = 0, badStep = 0;
       for (const n of board.nodes) {
         const exits = n.adjacent.filter((id, j) => id && !((n.oneWay || 0) & (8 >> j)));
-        if (exits.length < 2 && n.event !== 15 && n.event !== 16) dead++;
+        if (exits.length < 2 && n.ref !== 8001 && n.ref !== 8002) dead++;
         for (const id of n.adjacent) {
           const nb = id ? map.get(id) : null;
           if (id && !nb) badRef++;
@@ -268,6 +268,8 @@
       runAudit();
     }
 
+    const escAttr = s => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
     function renderInspector() {
       const el = document.getElementById('inspector');
       if (!selected) { el.innerHTML = '未選取節點（點擊節點可檢視/編輯）'; return; }
@@ -283,26 +285,26 @@
         if (ent.kind === 'land') {
           entHtml = `<h2>地產 #${it.id} (ref ${n.ref})</h2>
             <div class="grid2">
-              <div><label>街區名稱</label><input id="eName" value="${it.name || ''}"></div>
-              <div><label>地價 / 每級造價</label><div class="row"><input id="ePrice" type="number" value="${it.price}"><input id="ePer" type="number" value="${it.perLevel}"></div></div>
+              <div><label>街區名稱</label><input id="eName" value="${escAttr(it.name || '')}"></div>
+              <div><label>地價 / 每級造價</label><div class="row"><input id="ePrice" type="number" value="${escAttr(it.price)}"><input id="ePer" type="number" value="${escAttr(it.perLevel)}"></div></div>
             </div>
             <label style="margin-top:4px">過路費 (0~5級，逗號分隔)</label>
-            <input id="eTolls" value="${(it.tolls || []).join(',')}">`;
+            <input id="eTolls" value="${escAttr((it.tolls || []).join(','))}">`;
         } else if (ent.kind === 'fac') {
           entHtml = `<h2>設施 #${it.id} (ref ${n.ref})</h2>
             <div class="grid2">
-              <div><label>名稱</label><input id="eName" value="${it.name || ''}"></div>
-              <div><label>類型</label><select id="eFacType">${FAC_TYPES.map((t, i) => `<option value="${i}" ${it.type === i ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+              <div><label>名稱</label><input id="eName" value="${escAttr(it.name || '')}"></div>
+              <div><label>類型</label><select id="eFacType">${FAC_TYPES.map((t, i) => `<option value="${i}" ${it.type === i ? 'selected' : ''}>${escAttr(t)}</option>`).join('')}</select></div>
             </div>
             <div class="grid2" style="margin-top:4px">
-              <div><label>造價</label><input id="ePrice" type="number" value="${it.price}"></div>
-              <div><label>收費 (0~5級)</label><input id="eFees" value="${(it.fees || []).join(',')}"></div>
+              <div><label>造價</label><input id="ePrice" type="number" value="${escAttr(it.price)}"></div>
+              <div><label>收費 (0~5級)</label><input id="eFees" value="${escAttr((it.fees || []).join(','))}"></div>
             </div>`;
         } else if (ent.kind === 'comp') {
           entHtml = `<h2>企業 #${it.id} (ref ${n.ref})</h2>
             <div class="grid2">
-              <div><label>名稱</label><input id="eName" value="${it.name || ''}"></div>
-              <div><label>股票槽 / 基礎費</label><div class="row"><input id="eSlot" type="number" value="${it.stockSlot}"><input id="eBaseFee" type="number" value="${it.baseFee}"></div></div>
+              <div><label>名稱</label><input id="eName" value="${escAttr(it.name || '')}"></div>
+              <div><label>股票槽 / 基礎費</label><div class="row"><input id="eSlot" type="number" value="${escAttr(it.stockSlot)}"><input id="eBaseFee" type="number" value="${escAttr(it.baseFee)}"></div></div>
             </div>`;
         }
       }
@@ -310,17 +312,17 @@
       el.innerHTML = `
         <h2>節點 #${n.id}</h2>
         <div class="grid3">
-          <div><label>X</label><input id="nX" type="number" value="${n.x}"></div>
-          <div><label>Y</label><input id="nY" type="number" value="${n.y}"></div>
-          <div><label>ref</label><input id="nRef" type="number" value="${n.ref || 0}"></div>
+          <div><label>X</label><input id="nX" type="number" value="${escAttr(n.x)}"></div>
+          <div><label>Y</label><input id="nY" type="number" value="${escAttr(n.y)}"></div>
+          <div><label>ref</label><input id="nRef" type="number" value="${escAttr(n.ref || 0)}"></div>
         </div>
         <div class="grid2" style="margin-top:4px">
-          <div><label>事件類型</label><select id="evSel">${EVENTS.map(([v, t]) => `<option value="${v}" ${n.event === v ? 'selected' : ''}>${v}: ${t}</option>`).join('')}</select></div>
+          <div><label>事件類型</label><select id="evSel">${EVENTS.map(([v, t]) => `<option value="${v}" ${n.event === v ? 'selected' : ''}>${v}: ${escAttr(t)}</option>`).join('')}</select></div>
           <div style="display:flex;align-items:end;padding-bottom:4px"><label class="row"><input id="nNoDrop" type="checkbox" ${n.noDrop ? 'checked' : ''}> 禁止隨機放置 (noDrop)</label></div>
         </div>
         <label style="margin-top:4px">鄰接槽位 (勾選 = 該方向禁止離開 / 單行道)</label>
         <div class="grid2">
-          ${[0, 1, 2, 3].map(j => `<div class="row"><input class="adjSlot" data-j="${j}" type="number" value="${n.adjacent[j] || 0}"><label class="row" style="margin:0"><input class="owSlot" data-j="${j}" type="checkbox" ${(n.oneWay & (8 >> j)) ? 'checked' : ''}>禁</label></div>`).join('')}
+          ${[0, 1, 2, 3].map(j => `<div class="row"><input class="adjSlot" data-j="${j}" type="number" value="${escAttr(n.adjacent[j] || 0)}"><label class="row" style="margin:0"><input class="owSlot" data-j="${j}" type="checkbox" ${(n.oneWay & (8 >> j)) ? 'checked' : ''}>禁</label></div>`).join('')}
         </div>
         ${entHtml}
         <div class="row" style="margin-top:8px"><button id="btnDel" class="danger" style="width:100%">刪除此節點</button></div>
@@ -374,7 +376,15 @@
         pushHistory();
         const id = n.id;
         board.nodes = board.nodes.filter(x => x.id !== id);
-        for (const x of board.nodes) x.adjacent = x.adjacent.map(a => (a === id ? 0 : a));
+        const idMap = new Map();
+        board.nodes.forEach((x, idx) => {
+          idMap.set(x.id, idx + 1);
+          x.id = idx + 1;
+        });
+        for (const x of board.nodes) {
+          x.adjacent = x.adjacent.map(a => (a && a !== id ? (idMap.get(a) || 0) : 0));
+        }
+        if (linkFrom && linkFrom.id === id) linkFrom = null;
         selected = null; renderInspector(); draw();
       };
     }
@@ -480,11 +490,18 @@
     document.getElementById('btnBg').onclick = () => document.getElementById('bgIn').click();
     document.getElementById('bgIn').onchange = e => {
       const f = e.target.files?.[0]; if (!f) return;
-      const im = new Image(); im.onload = draw; im.src = URL.createObjectURL(f); bgImg = im;
+      const url = URL.createObjectURL(f);
+      const im = new Image();
+      im.onload = () => { URL.revokeObjectURL(url); draw(); };
+      im.onerror = () => { URL.revokeObjectURL(url); };
+      im.src = url;
+      bgImg = im;
     };
     document.getElementById('btnExport').onclick = () => {
       const blob = new Blob([JSON.stringify(board, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `map-${board.mapId || 200}.json`; a.click();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `map-${board.mapId || 200}.json`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     };
 
     // Populate preset maps from assets/maps.json when served over HTTP
