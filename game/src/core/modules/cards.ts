@@ -633,7 +633,7 @@ export class Cards {
         return true;
       }
       case 16: case 17: { // 夢遊卡 §3.16 / 陷害卡 §3.17 with 復仇卡 §3.18
-        const t = yield* this.pickPlayer(p, human, id === 16 ? '請選擇夢遊對象' : '請選擇陷害對象', this.actors(p, false));
+        const t = yield* this.pickPlayer(p, human, id === 16 ? '請選擇夢遊對象' : '請選擇陷害對象', this.actors(p, false).filter(a => a >= g.npcBase || !this.sameTeam(p, a)));
         if (t < 0) return false;
         this.consume(p, id);
         if (t >= g.npcBase) {
@@ -770,7 +770,7 @@ export class Cards {
       }
       case 33: { // 遣返卡 (大富豪模式, 17 §3.5): a rival on screen, 免罪卡 / 嫁禍卡 apply as for the harmful cards
         if (!g.world) return false;
-        const t = yield* this.pickPlayer(p, human, '請選擇遣返對象', this.actors(p, false).filter(a => a < g.npcBase));
+        const t = yield* this.pickPlayer(p, human, '請選擇遣返對象', this.actors(p, false).filter(a => a < g.npcBase && !this.sameTeam(p, a)));
         if (t < 0) return false;
         this.consume(p, 33);
         const q = g.players[t];
@@ -995,12 +995,12 @@ export class Cards {
       }
       case 2: { // fcn_0041e779
         const v = view();
-        if (H >= 0 && seesPlayer(v, H)) {
+        if (H >= 0 && !this.sameTeam(p, H) && seesPlayer(v, H)) {
           const h = g.players[H];
           if (h.cash > 30000 * pi && h.cash > p.cash * 2) return set(H);
         }
         let pick = -1;
-        for (const s of v) if (s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && s.q.cash > 50000 * pi && s.q.cash > p.cash * 3) pick = s.q.id;
+        for (const s of v) if (s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && !this.sameTeam(p, s.q) && s.q.cash > 50000 * pi && s.q.cash > p.cash * 3) pick = s.q.id;
         return pick >= 0 && set(pick);
       }
       case 3: { // fcn_0041e9e2
@@ -1106,10 +1106,10 @@ export class Cards {
           for (const c of q.cards) if (ok(cardDef(c)?.f7 ?? 0) && cardPrice(c) > cardPrice(id2)) id2 = c;
           return id2;
         };
-        if (H >= 0 && seesPlayer(v, H)) { const c = best(g.players[H], f => f >= 1); if (c) return set(H, c); }
+        if (H >= 0 && !this.sameTeam(p, H) && seesPlayer(v, H)) { const c = best(g.players[H], f => f >= 1); if (c) return set(H, c); }
         let who = -1, card = 0;
         for (const s of v) {
-          if (s.k !== 'player' || s.q.id === p.id || !s.q.whoPlays) continue;
+          if (s.k !== 'player' || s.q.id === p.id || !s.q.whoPlays || this.sameTeam(p, s.q)) continue;
           const c = best(s.q, f => f === 2);
           if (c && cardPrice(c) > cardPrice(card)) { who = s.q.id; card = c; }
         }
@@ -1136,7 +1136,7 @@ export class Cards {
       }
       case 15: return g.rng.rand() % 4 === 0; // fcn_0041fe4e
       case 16: case 17: { // fcn_0041fe6f
-        const cands = view().flatMap(s => (s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && !s.q.sleep && !this.has(s.q, 18) ? [s.q.id] : []));
+        const cands = view().flatMap(s => (s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && !this.sameTeam(p, s.q) && !s.q.sleep && !this.has(s.q, 18) ? [s.q.id] : []));
         if (!cands.length) return false;
         return set(cands.includes(H) ? H : cands[g.rng.below(cands.length)]);
       }
@@ -1162,9 +1162,9 @@ export class Cards {
       }
       case 26: { // fcn_004202d2
         const v = view();
-        if (H >= 0 && seesPlayer(v, H) && g.players[H].cash > 30000 * pi && this.taxable(g.players[H])) return set(H);
+        if (H >= 0 && !this.sameTeam(p, H) && seesPlayer(v, H) && g.players[H].cash > 30000 * pi && this.taxable(g.players[H])) return set(H);
         let pick = -1;
-        for (const s of v) if (s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && s.q.cash > 50000 * pi && this.taxable(s.q)) pick = s.q.id;
+        for (const s of v) if (s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && !this.sameTeam(p, s.q) && s.q.cash > 50000 * pi && this.taxable(s.q)) pick = s.q.id;
         return pick >= 0 && set(pick);
       }
       case 27: { // fcn_0042040e
@@ -1204,7 +1204,7 @@ export class Cards {
       case 30: return this.aiTurtle(p);
       case 33: { // 遣返: the most resented rival on screen, else a richer one standing in view (17 §3.5)
         if (!g.world) return false;
-        const v = view().filter(s => s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && !g.offRoad(s.q)) as Extract<Seen, { k: 'player' }>[];
+        const v = view().filter(s => s.k === 'player' && s.q.id !== p.id && s.q.whoPlays && !this.sameTeam(p, s.q) && !g.offRoad(s.q)) as Extract<Seen, { k: 'player' }>[];
         if (H >= 0 && v.some(s => s.q.id === H)) return set(H);
         const rich = v.map(s => s.q).filter(q => g.wealth(q) > g.wealth(p) * 0.8).sort((a, b) => g.wealth(b) - g.wealth(a))[0];
         return !!rich && set(rich.id);
@@ -1233,8 +1233,8 @@ export class Cards {
       !a || b.level > a.level || (b.level === a.level && b.price > a.price);
     const lands: (Land | undefined)[] = [], facs: (Facility | undefined)[] = [];
     for (const s of this.view(p)) {
-      if (s.k === 'land' && s.land.owner && s.land.owner !== p.id + 1 && s.land.level >= 3 && better(lands[s.land.owner - 1], s.land)) lands[s.land.owner - 1] = s.land;
-      if (s.k === 'fac' && s.fac.owner && s.fac.owner !== p.id + 1 && s.fac.level >= 3 && better(facs[s.fac.owner - 1], s.fac)) facs[s.fac.owner - 1] = s.fac;
+      if (s.k === 'land' && s.land.owner && s.land.owner !== p.id + 1 && !this.sameTeam(p, s.land.owner - 1) && s.land.level >= 3 && better(lands[s.land.owner - 1], s.land)) lands[s.land.owner - 1] = s.land;
+      if (s.k === 'fac' && s.fac.owner && s.fac.owner !== p.id + 1 && !this.sameTeam(p, s.fac.owner - 1) && s.fac.level >= 3 && better(facs[s.fac.owner - 1], s.fac)) facs[s.fac.owner - 1] = s.fac;
     }
     let target = 0;
     if (H >= 0) target = facs[H] ? facs[H]!.id + 4000 : lands[H] ? lands[H]!.id + 2000 : 0;
@@ -1297,7 +1297,7 @@ export class Cards {
   /** _rich4_find_most_hostile_player: strictly highest hostility above 0, lowest id on ties; -1 when none. */
   mostHostile(p: Player): number {
     let best = -1, v = 0;
-    for (const q of this.g.players) if (q.id !== p.id && q.whoPlays !== 0 && p.hostility[q.id] > v) { v = p.hostility[q.id]; best = q.id; }
+    for (const q of this.g.players) if (q.id !== p.id && q.whoPlays !== 0 && !this.sameTeam(p, q) && p.hostility[q.id] > v) { v = p.hostility[q.id]; best = q.id; }
     return best;
   }
 
@@ -1441,8 +1441,13 @@ export class Cards {
     return typeof a === 'number' && targets[a] ? targets[a] : null;
   }
 
+  private sameTeam(p: Player, q: Player | number): boolean {
+    const pq = typeof q === 'number' ? this.g.players[q] : q;
+    return !!pq && (p.team ?? 0) > 0 && p.team === pq.team;
+  }
+
   private opponents(p: Player): Player[] {
-    return this.g.players.filter(q => q.id !== p.id && q.whoPlays !== 0);
+    return this.g.players.filter(q => q.id !== p.id && q.whoPlays !== 0 && !this.sameTeam(p, q));
   }
 
   /** Players and NPCs on the board (selector type 0x10); NPCs are npcBase.. (4..7 with up to 4 players). */
