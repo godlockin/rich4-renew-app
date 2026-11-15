@@ -294,7 +294,9 @@ const stickers = (n: number) => `<span class="col-stars">${Array.from({ length: 
 
 /** One card: the picture, its name and its stars; 「？？？」 while not earned (`shown`: the picture anyway). */
 export function cardHtml(t: ChallengeTask, stars: number, shown = stars > 0): string {
-  if (!shown) return `<button class="col-card none" data-card="${t.id}"><b>？？？</b></button>`;
+  if (!shown) {
+    return `<button class="col-card none" data-card="${t.id}" aria-label="未解鎖成就卡片"><span class="col-back" style="width:82%;height:84%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6%;border:1.5px dashed rgba(200,212,255,.38);border-radius:8px;background:radial-gradient(circle at 50% 38%,rgba(143,160,208,.2),rgba(18,24,58,.38));box-sizing:border-box;padding:6%"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:40%;max-width:48px;min-width:18px;aspect-ratio:1;fill:none;stroke:#c8d4ff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.85"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><b>？？？</b><span style="font-size:clamp(9px,11cqw,13px);padding:2px 8px;border-radius:999px;background:rgba(143,160,208,.2);border:1px solid rgba(200,212,255,.3);color:#c8d4ff;letter-spacing:1px;line-height:1.2">未解鎖</span></span></button>`;
+  }
   return `<button class="col-card" data-card="${t.id}"><img class="col-pic" src="${ART}/${t.id}.webp" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
     ${stickers(stars)}<span class="col-name">${esc(t.name)}</span></button>`;
 }
@@ -408,8 +410,8 @@ async function bragCanvas(t: ChallengeTask, card: Card, mapName: (id: number) =>
   x.save(); x.translate(W / 2, 560); x.fillStyle = 'rgba(255, 214, 90, .10)';
   for (let i = 0; i < 18; i++) { x.rotate(Math.PI / 9); x.beginPath(); x.moveTo(0, 0); x.lineTo(-90, -1100); x.lineTo(90, -1100); x.closePath(); x.fill(); }
   x.restore();
-  const text = (s: string, px: number, y: number, color: string, weight = 700, align: CanvasTextAlign = 'center', left = W / 2) => {
-    x.font = `${weight} ${px}px ${FONT()}`; x.fillStyle = color; x.textAlign = align; x.fillText(s, left, y);
+  const text = (s: string, px: number, y: number, color: string, weight = 700, align: CanvasTextAlign = 'center', left = W / 2, maxW?: number) => {
+    x.font = `${weight} ${px}px ${FONT()}`; x.fillStyle = color; x.textAlign = align; x.fillText(s, left, y, maxW);
   };
   text('大富翁4・成就卡', 44, 92, '#ffe27a', 800);
   // The card: the picture in a white frame, its stars, its name.
@@ -448,7 +450,7 @@ async function bragCanvas(t: ChallengeTask, card: Card, mapName: (id: number) =>
     x.save(); x.fillStyle = '#fff'; x.beginPath(); x.roundRect(sx - 8, y - 8, sw + 16, sh + 16, 22); x.fill();
     x.beginPath(); x.roundRect(sx, y, sw, sh, 16); x.clip(); x.drawImage(shot, sx, y, sw, sh); x.restore();
   }
-  text(`圖鑑收集 ${have} / ${ALL.length}`, 30, H - 48, 'rgba(255,255,255,.6)', 500);
+  text(`大富翁4 重製版・圖鑑收集 ${have} / ${ALL.length}・github.com/iam567/rich4-renew-app`, 24, H - 48, 'rgba(255,255,255,.62)', 500, 'center', W / 2, W - 96);
   return c;
 }
 

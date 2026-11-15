@@ -179,6 +179,6 @@ export async function drawResultsCard(r: GameResults, o: CardOptions): Promise<H
     text(c, value, cx, ty + 70, 36, color ?? '#fff', 'center', true, tw - left - 14);
   });
   y += statsRows * 118 + 20;
-  text(c, `大富翁4 重製版・${format(r.date)}`, W / 2, H - 80, 26, 'rgba(255,255,255,.75)', 'center', false);
+  text(c, `大富翁4 重製版・${format(r.date)}・github.com/iam567/rich4-renew-app`, W / 2, H - 80, 23, 'rgba(255,255,255,.72)', 'center', false, bw - 80);
   return canvas;
 }
