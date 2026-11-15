@@ -23,6 +23,10 @@ const MAX_SESSIONS = 10_000;
 const MAX_CONNS = 20_000;
 const MAX_PRESENCE = 20_000;
 const MAX_PUBLIC_ROOMS = 2_000;
+const MAX_LEADERBOARD_BODY = 4096;
+const MAX_LEADERBOARD_WEEKS = 16;
+const MAX_LEADERBOARD_ENTRIES_PER_WEEK = 100;
+const LEADERBOARD_TOP_N = 20;
 
 let monthKey = new Date().toISOString().slice(0, 7);
 let monthOutBytes = 0;
@@ -41,6 +45,8 @@ const conns = new Map();
 const presence = new Map();
 /** @type {Map<string, any>} */
 const publicRooms = new Map();
+/** @type {Map<string, Array<{ puzzleId: string, weekKey: string, seed: number, playerName: string, turns: number, finalAssets: number, stateHash: number, digest: string, submittedAt: number }>>} */
+const puzzleLeaderboards = new Map();
 
 function lruSet(map, key, val, max) {
   if (map.has(key)) map.delete(key);
@@ -415,6 +421,67 @@ const server = http.createServer(async (req, res) => {
     await readBody(req);
     sendJson(res, 200, { ok: true });
     return;
+  }
+
+  if (u.pathname === '/puzzles/leaderboard') {
+    if (req.method === 'GET') {
+      const week = (u.searchParams.get('week') || '').trim();
+      if (!/^\d{4}-W\d{2}$/.test(week)) {
+        sendJson(res, 400, { error: 'invalid or missing week' });
+        return;
+      }
+      const list = puzzleLeaderboards.get(week) || [];
+      sendJson(res, 200, { week, entries: list.slice(0, LEADERBOARD_TOP_N) });
+      return;
+    }
+    if (req.method === 'POST') {
+      const b = await readBody(req, MAX_LEADERBOARD_BODY);
+      if (!b || typeof b !== 'object' || Array.isArray(b)) {
+        sendJson(res, 400, { error: 'invalid payload' });
+        return;
+      }
+      const valid =
+        typeof b.puzzleId === 'string' && b.puzzleId.trim().length > 0 && b.puzzleId.length <= 64 &&
+        typeof b.weekKey === 'string' && /^\d{4}-W\d{2}$/.test(b.weekKey) &&
+        typeof b.seed === 'number' && Number.isFinite(b.seed) &&
+        typeof b.playerName === 'string' && b.playerName.trim().length > 0 && b.playerName.length <= 64 &&
+        typeof b.turns === 'number' && Number.isInteger(b.turns) && b.turns >= 0 &&
+        typeof b.finalAssets === 'number' && Number.isFinite(b.finalAssets) &&
+        typeof b.stateHash === 'number' && Number.isInteger(b.stateHash) && b.stateHash >= 0 &&
+        typeof b.digest === 'string' && /^[0-9a-f]{8,64}$/i.test(b.digest);
+      if (!valid) {
+        sendJson(res, 400, { error: 'invalid receipt fields' });
+        return;
+      }
+      const week = b.weekKey;
+      let list = puzzleLeaderboards.get(week);
+      if (list) {
+        puzzleLeaderboards.delete(week);
+      } else {
+        if (puzzleLeaderboards.size >= MAX_LEADERBOARD_WEEKS) {
+          puzzleLeaderboards.delete(puzzleLeaderboards.keys().next().value);
+        }
+        list = [];
+      }
+      const entry = {
+        puzzleId: b.puzzleId.trim(),
+        weekKey: week,
+        seed: b.seed,
+        playerName: b.playerName.trim().slice(0, 32),
+        turns: b.turns,
+        finalAssets: b.finalAssets,
+        stateHash: b.stateHash,
+        digest: b.digest.toLowerCase(),
+        submittedAt: Date.now(),
+      };
+      list.push(entry);
+      list.sort((a, c) => (a.turns - c.turns) || (c.finalAssets - a.finalAssets) || (a.submittedAt - c.submittedAt));
+      if (list.length > MAX_LEADERBOARD_ENTRIES_PER_WEEK) list.length = MAX_LEADERBOARD_ENTRIES_PER_WEEK;
+      puzzleLeaderboards.set(week, list);
+      const idx = list.indexOf(entry);
+      sendJson(res, 200, { ok: true, week, rank: idx === -1 ? null : idx + 1, total: list.length });
+      return;
+    }
   }
 
   sendJson(res, 404, { error: 'not found' });
