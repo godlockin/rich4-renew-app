@@ -98,7 +98,7 @@ describe.skipIf(!haveMaps)('news and fate', () => {
     expect(g.events.fateNext).toBe(1);
   });
 
-  it('rewrites vehicle entries by the current vehicle and skips the map prison entries on stage 1 maps', () => {
+  it('rewrites vehicle entries by the current vehicle and skips the map prison entries when the board has no prison', () => {
     const g = newGame(0), p = g.players[0];
     expect(g.events.fateCheck(p, 10)).toBe(-1);
     expect(g.events.fateCheck(p, 13)).toBe(12);
@@ -109,6 +109,8 @@ describe.skipIf(!haveMaps)('news and fate', () => {
     expect(g.events.fateCheck(p, 14)).toBe(16);
     expect(g.events.fateCheck(p, 35)).toBe(35);
     const h = newGame(4);
+    expect(h.events.fateCheck(h.players[0], 35)).toBe(35);
+    for (const n of h.board.nodes) { if (n.ref === 8002) n.ref = 0; if (n.event === 4) n.event = 0; }
     expect(h.events.fateCheck(h.players[0], 35)).toBe(-1);
   });
 

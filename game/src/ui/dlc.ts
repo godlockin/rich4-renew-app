@@ -14,10 +14,10 @@ export interface DlcPackInfo {
 }
 
 export const DLC_PACKS: readonly DlcPackInfo[] = [
-  { id: 'tycoon', name: '大富豪・日本五城', desc: '東京、大阪、札幌、九州、沖繩地圖與地方事件', probe: `${ASSETS}/maps/remake/map-100.json` },
-  { id: 'kabukicho', name: '歌舞伎町', desc: '夜生活主題地圖、店鋪與柏青哥小遊戲', probe: `${ASSETS}/maps/remake/map-106.json` },
-  { id: 'jiqing', name: '激情歲月', desc: '北京舊城懷舊地圖、大喇叭廣播與專屬皮膚', probe: `${ASSETS}/maps/remake/map-107.json` },
-  { id: 'finale', name: '大富翁城', desc: '純籌碼終極決戰與五種賭場大廳', probe: `${ASSETS}/maps/remake/map-105.json` },
+  { id: 'tycoon', name: '大富豪・日本五城', desc: '東京、大阪、札幌、九州、沖繩地圖與地方事件', probe: `${ASSETS}/maps/remake/tokyo.json` },
+  { id: 'kabukicho', name: '歌舞伎町', desc: '夜生活主題地圖、店鋪與柏青哥小遊戲', probe: `${ASSETS}/maps/remake/kabukicho.json` },
+  { id: 'jiqing', name: '激情歲月', desc: '北京舊城懷舊地圖、大喇叭廣播與專屬皮膚', probe: `${ASSETS}/maps/remake/jiqing.json` },
+  { id: 'finale', name: '大富翁城', desc: '純籌碼終極決戰與五種賭場大廳', probe: `${ASSETS}/maps/remake/finale.json` },
   { id: 'challenge', name: '圖鑑高清立繪', desc: '425 張挑戰與每月任務原創插畫卡', probe: `${ASSETS}/maps/remake/challenge/star.webp` },
 ];
 

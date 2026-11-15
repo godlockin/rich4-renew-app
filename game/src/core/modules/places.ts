@@ -7,7 +7,7 @@ import { addMonths } from '../date';
 import { companyOf, facilityOf, landOf, type BoardNode } from '../board';
 import { CHARACTERS } from '../characters';
 import { ask, type Flow } from '../flow';
-import { Game, tick } from '../game';
+import { FACILITY_MAX_LEVEL, Game, tick } from '../game';
 import { LAND_LIMIT_MONTHS, type Option, type Player } from '../types';
 import { cardPrice, isTycoonCard } from './cards';
 
@@ -45,9 +45,6 @@ export const MAGIC_NAMES = [
   '得一張卡片', '向後轉', '變賣所有道具', '就地拆除房屋', '住院檢查三天', '拍賣當格土地',
 ];
 export const MAGIC_GROUPS = ['資產最多', '土地最多', '房屋最多', '現金最多', '存款最多', '點券最多', '步行者', '騎機車者', '開汽車者', '有神附身者', '所有男性', '所有女性'];
-/** Facility level caps by type (ref_00474940). */
-const FACILITY_MAX = [1, 5, 5, 1, 5, 5, 5, 5, 5, 5]; // + 5..9 大富翁城's halls (docs/rules/19)
-FACILITY_MAX[14] = 5; // 激情歲月's 宣傳站 (docs/rules/24 §2.4); 10..13 stay as they were
 
 interface Seat { p: Player; flag: number; permanent: boolean; max: number; out: boolean }
 
@@ -367,7 +364,7 @@ export class Places {
             else if (g.isHuman(q)) f.type = Math.max(0, Math.min(4, Number(yield ask({ t: 'facility-type', p: q.id, price: 0 })) || 0));
             else f.type = f.owner === q.id + 1 ? g.rng.below(4) + 1 : 0;
             f.level = 1;
-          } else if (f.level < FACILITY_MAX[f.type]) f.level += 1;
+          } else if (f.level < FACILITY_MAX_LEVEL[f.type]) f.level += 1;
           else break;
           yield { t: 'build', p: q.id, kind: 'facility', id: f.id, level: f.level, cost: 0 };
         } else {
@@ -416,6 +413,7 @@ export class Places {
   turnAround(q: { dir: number; node: number; lastNode: number }): void {
     q.dir = (q.dir + 4) & 7;
     const n = this.g.node(q.node);
+    if (!n) return;
     const ahead = n.adjacent.filter((a, j) => a && a !== q.lastNode && !(n.oneWay & (8 >> j)));
     q.lastNode = ahead.length ? ahead[this.g.rng.below(ahead.length)] : 0;
   }

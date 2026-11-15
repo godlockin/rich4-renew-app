@@ -92,6 +92,7 @@ export function peekSave(b: Uint8Array): SlotPreview {
 /** The whole save. Throws on a damaged file (length, CRC or JSON). */
 export function decodeSave(b: Uint8Array): SaveData {
   const h = header(b);
+  if (h.size <= 0 || h.size > 32 * 1024 * 1024) throw new Error('save file damaged');
   // Inflated straight into one buffer of the known size: no growing copies on a phone short of memory.
   const json = inflateSync(b.subarray(HEAD + h.pre), { out: new Uint8Array(h.size) });
   if (json.length !== h.size || crc32(json) !== h.crc) throw new Error('save file damaged');

@@ -13,9 +13,9 @@ export const FINALE_CHIP = 100;
 export interface ChipLine { key: string; label: string; per: number; chips: number; input: (i: ChipInputs) => number }
 export interface ChipBadge { key: string; label: string; rule: string; chips: number; test: (i: ChipInputs, all: ChipInputs[]) => boolean }
 
-/** The lines of the formula (the user's table, 2026-10-17). */
+/** The lines of the formula (the user's table, 2026-10-17; rebalanced for 5-city wealth carry-over). */
 export const CHIP_LINES: ChipLine[] = [
-  { key: 'money', label: '最後現金存款', per: 10000, chips: 2, input: i => Math.max(0, i.finalMoney) },
+  { key: 'money', label: '最後現金存款', per: 10000, chips: 5, input: i => Math.max(0, i.finalMoney) },
   { key: 'lands', label: '買下土地', per: 1, chips: 10, input: i => i.landsBought },
   { key: 'levels', label: '加蓋等級', per: 1, chips: 4, input: i => i.levelsAdded },
   { key: 'facilities', label: '蓋大型設施', per: 1, chips: 30, input: i => i.facilitiesBuilt },
@@ -47,6 +47,14 @@ export const CHIP_BADGES: ChipBadge[] = [
 /** The five cities only (大富翁城, index 5, does not count). */
 const fiveCities = (i: ChipInputs) => i.citiesVisited.filter(c => c >= 0 && c < 5).length;
 
+/** Five-city unrealized holdings carried into the finale (5% = 5 chips per 10,000 元, matching cash). */
+export interface ChipValuation { property?: number; stocks?: number }
+
+export const CHIP_VALUATION_LINES: { key: string; label: string; per: number; chips: number; value: (v: ChipValuation) => number }[] = [
+  { key: 'property', label: '五城地產估值', per: 10000, chips: 5, value: v => Math.max(0, v.property ?? 0) },
+  { key: 'stockValue', label: '股票持倉市值', per: 10000, chips: 5, value: v => Math.max(0, v.stocks ?? 0) },
+];
+
 export interface ChipScore {
   lines: { key: string; label: string; figure: number; chips: number }[];
   badges: { key: string; label: string; rule: string; chips: number }[];
@@ -54,9 +62,15 @@ export interface ChipScore {
 }
 
 /** A player's chips from the ledger (call `ledger.finish(world)` first); `everyone` are all players' ids (12). */
-export function chipScore(ledger: Ledger, p: number, everyone: number[]): ChipScore {
+export function chipScore(ledger: Ledger, p: number, everyone: number[], valuation?: ChipValuation): ChipScore {
   const mine = chipInputs(ledger, p), all = everyone.map(q => chipInputs(ledger, q));
   const lines = CHIP_LINES.map(l => { const figure = l.input(mine); return { key: l.key, label: l.label, figure, chips: Math.floor(Math.max(0, figure) / l.per) * l.chips }; });
+  if (valuation) {
+    for (const v of CHIP_VALUATION_LINES) {
+      const figure = v.value(valuation);
+      lines.push({ key: v.key, label: v.label, figure, chips: Math.floor(figure / v.per) * v.chips });
+    }
+  }
   const badges = CHIP_BADGES.filter(b => b.test(mine, all)).map(b => ({ key: b.key, label: b.label, rule: b.rule, chips: b.chips }));
   const total = lines.reduce((a, l) => a + l.chips, 0) + badges.reduce((a, b) => a + b.chips, 0);
   return { lines, badges, total };

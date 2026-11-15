@@ -18,6 +18,11 @@ const PRESENCE_TTL_MS = 35_000;
 const ROOM_TTL_MS = 25_000;
 const MONTH_CAP_BYTES = Number(process.env.MONTH_CAP_GB || 800) * 1024 * 1024 * 1024;
 const MAX_BUFFER = 8 << 20;
+const MAX_FRAME = 2 * 1024 * 1024;
+const MAX_SESSIONS = 10_000;
+const MAX_CONNS = 20_000;
+const MAX_PRESENCE = 20_000;
+const MAX_PUBLIC_ROOMS = 2_000;
 
 let monthKey = new Date().toISOString().slice(0, 7);
 let monthOutBytes = 0;
@@ -37,40 +42,63 @@ const presence = new Map();
 /** @type {Map<string, any>} */
 const publicRooms = new Map();
 
+function lruSet(map, key, val, max) {
+  if (map.has(key)) map.delete(key);
+  else if (map.size >= max) map.delete(map.keys().next().value);
+  map.set(key, val);
+}
+
 // ------------------------------------------------------------------ minimal RFC 6455 WebSocket framing
+
+function wsEncodeHeader(firstByte, len) {
+  if (len < 126) return Buffer.from([firstByte, len]);
+  if (len < 65536) {
+    const h = Buffer.allocUnsafe(4);
+    h[0] = firstByte; h[1] = 126; h.writeUInt16BE(len, 2);
+    return h;
+  }
+  const h = Buffer.allocUnsafe(10);
+  h[0] = firstByte; h[1] = 127; h.writeBigUInt64BE(BigInt(len), 2);
+  return h;
+}
 
 function wsSend(ws, text) {
   if (!ws || ws.destroyed || ws.writableEnded) return;
   const payload = Buffer.from(text, 'utf8');
   trackBytes(payload.length);
-  const len = payload.length;
-  let header;
-  if (len < 126) {
-    header = Buffer.from([0x81, len]);
-  } else if (len < 65536) {
-    header = Buffer.allocUnsafe(4);
-    header[0] = 0x81; header[1] = 126; header.writeUInt16BE(len, 2);
-  } else {
-    header = Buffer.allocUnsafe(10);
-    header[0] = 0x81; header[1] = 127; header.writeBigUInt64BE(BigInt(len), 2);
-  }
-  ws.write(Buffer.concat([header, payload]));
+  ws.write(Buffer.concat([wsEncodeHeader(0x81, payload.length), payload]));
 }
 
 function attachWs(socket, onMsg, onClose) {
   let buf = Buffer.alloc(0);
   let closed = false;
+  let fragParts = null;
+  let fragBytes = 0;
   const finish = () => { if (!closed) { closed = true; onClose(); } };
+  const abort = () => { try { socket.destroy(); } catch { /* ignore */ } finish(); };
   socket.on('data', chunk => {
+    if (closed) return;
+    if (buf.length + chunk.length > MAX_FRAME * 2) { abort(); return; }
     buf = Buffer.concat([buf, chunk]);
     while (buf.length >= 2) {
       const b0 = buf[0], b1 = buf[1];
+      const fin = (b0 & 0x80) !== 0;
       const opcode = b0 & 0x0f;
       const masked = (b1 & 0x80) !== 0;
       let len = b1 & 0x7f;
       let off = 2;
-      if (len === 126) { if (buf.length < 4) break; len = buf.readUInt16BE(2); off = 4; }
-      else if (len === 127) { if (buf.length < 10) break; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+      if (len === 126) {
+        if (buf.length < 4) break;
+        len = buf.readUInt16BE(2);
+        off = 4;
+      } else if (len === 127) {
+        if (buf.length < 10) break;
+        const bigLen = buf.readBigUInt64BE(2);
+        if (bigLen > BigInt(MAX_FRAME)) { abort(); return; }
+        len = Number(bigLen);
+        off = 10;
+      }
+      if (len > MAX_FRAME) { abort(); return; }
       const maskOff = off;
       if (masked) off += 4;
       if (buf.length < off + len) break;
@@ -80,9 +108,35 @@ function attachWs(socket, onMsg, onClose) {
         for (let i = 0; i < data.length; i++) data[i] ^= mask[i & 3];
       }
       buf = buf.subarray(off + len);
-      if (opcode === 0x8) { socket.end(); finish(); return; }
-      if (opcode === 0x9) { socket.write(Buffer.concat([Buffer.from([0x8a, data.length]), data])); continue; }
-      if (opcode === 0x1 || opcode === 0x2) onMsg(data.toString('utf8'));
+      if (opcode >= 0x8) {
+        if (!fin) { abort(); return; }
+        if (opcode === 0x8) { socket.end(); finish(); return; }
+        if (opcode === 0x9) { socket.write(Buffer.concat([wsEncodeHeader(0x8a, data.length), data])); continue; }
+        continue;
+      }
+      if (opcode === 0x1 || opcode === 0x2) {
+        if (fragParts !== null) { abort(); return; }
+        if (fin) {
+          onMsg(data.toString('utf8'));
+        } else {
+          fragParts = [data];
+          fragBytes = data.length;
+        }
+      } else if (opcode === 0x0) {
+        if (fragParts === null) { abort(); return; }
+        fragBytes += data.length;
+        if (fragBytes > MAX_FRAME) { abort(); return; }
+        fragParts.push(data);
+        if (fin) {
+          const full = Buffer.concat(fragParts, fragBytes);
+          fragParts = null;
+          fragBytes = 0;
+          onMsg(full.toString('utf8'));
+        }
+      } else {
+        abort();
+        return;
+      }
     }
   });
   socket.on('close', finish);
@@ -147,7 +201,7 @@ function handleFrame(ws, state, raw) {
         return;
       }
       // 房主已斷線或 20 秒無回應：允許新房主接管房間 ID
-      const silent = !existing.ws || (now - existing.lastHeard > TAKEOVER_MS);
+      const silent = (existing.lostAt ? (now - existing.lostAt) : (now - existing.lastHeard)) > TAKEOVER_MS;
       if (!silent) {
         wsSend(ws, JSON.stringify({ t: 'taken' }));
         ws.end();
@@ -159,7 +213,7 @@ function handleFrame(ws, state, raw) {
       }
       dropSession(existing);
     }
-    if (overCap()) {
+    if (overCap() || sessions.size >= MAX_SESSIONS) {
       wsSend(ws, JSON.stringify({ t: 'full' }));
       ws.end();
       return;
@@ -208,7 +262,7 @@ function handleFrame(ws, state, raw) {
   if (m.t === 'conn') {
     const cid = String(m.cid || ''), to = String(m.to || '');
     const peer = sessions.get(to);
-    if (!peer || !cid) {
+    if (!peer || !cid || conns.has(cid) || conns.size >= MAX_CONNS) {
       sendTo(s, { t: 'nopeer', cid });
       return;
     }
@@ -220,7 +274,7 @@ function handleFrame(ws, state, raw) {
 
   if (m.t === 'd') {
     const c = conns.get(String(m.cid || ''));
-    if (!c) return;
+    if (!c || (c.a !== s.id && c.b !== s.id)) return;
     const target = c.a === s.id ? c.b : c.a;
     sendTo(sessions.get(target), { t: 'd', cid: m.cid, d: m.d });
     return;
@@ -229,7 +283,7 @@ function handleFrame(ws, state, raw) {
   if (m.t === 'close') {
     const cid = String(m.cid || '');
     const c = conns.get(cid);
-    if (!c) return;
+    if (!c || (c.a !== s.id && c.b !== s.id)) return;
     conns.delete(cid);
     const target = c.a === s.id ? c.b : c.a;
     sendTo(sessions.get(target), { t: 'close', cid });
@@ -251,11 +305,22 @@ function readBody(req, limit = 32_768) {
   return new Promise(resolve => {
     const chunks = [];
     let len = 0;
-    req.on('data', c => { len += c.length; if (len <= limit) chunks.push(c); });
-    req.on('end', () => {
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch { resolve(null); }
+    let done = false;
+    const finish = val => { if (!done) { done = true; resolve(val); } };
+    req.on('data', c => {
+      len += c.length;
+      if (len > limit) {
+        req.destroy();
+        finish(null);
+        return;
+      }
+      chunks.push(c);
     });
-    req.on('error', () => resolve(null));
+    req.on('end', () => {
+      if (done) return;
+      try { finish(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch { finish(null); }
+    });
+    req.on('error', () => finish(null));
   });
 }
 
@@ -302,14 +367,14 @@ const server = http.createServer(async (req, res) => {
     if (dev) {
       if (where === 'off') presence.delete(dev);
       else if (where === 'menu' || where === 'room' || where === 'game') {
-        presence.set(dev, {
+        lruSet(presence, dev, {
           dev,
           where,
           v: u.searchParams.get('v') || undefined,
           plat: u.searchParams.get('plat') || undefined,
           name: u.searchParams.get('name') || undefined,
           at: Date.now(),
-        });
+        }, MAX_PRESENCE);
       }
     }
     const now = Date.now();
@@ -329,7 +394,7 @@ const server = http.createServer(async (req, res) => {
     const now = Date.now();
     if (req.method === 'POST') {
       const b = await readBody(req);
-      if (b?.code && !b.private) publicRooms.set(String(b.code), { ...b, at: now });
+      if (b?.code && !b.private) lruSet(publicRooms, String(b.code), { ...b, at: now }, MAX_PUBLIC_ROOMS);
       else if (b?.remove) publicRooms.delete(String(b.remove));
       sendJson(res, 200, { ok: true });
       return;
@@ -379,5 +444,7 @@ server.on('upgrade', (req, socket) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`rich4 party-relay listening on http://${HOST}:${PORT}`);
+  const addr = server.address();
+  const boundPort = typeof addr === 'object' && addr ? addr.port : PORT;
+  console.log(`rich4 party-relay listening on http://${HOST}:${boundPort}`);
 });

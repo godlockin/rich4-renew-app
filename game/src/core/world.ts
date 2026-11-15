@@ -293,7 +293,7 @@ export class World implements WorldHooks {
       const ch = CHARACTERS[s.character];
       const cash = s.human ? Math.trunc(this.fund / 2) : Math.trunc((ch.cashRatio * this.fund) / 100);
       return {
-        id, character: s.character, human: s.human, whoPlays: 0, autopilot: false, bankrupt: false, placed: false,
+        id, character: s.character, human: s.human, whoPlays: s.human ? 1 : 2, autopilot: false, bankrupt: false, placed: false,
         node: 0, lastNode: 0, dir: 0, traffic: settings.traffic, dice: settings.traffic + 1,
         cash, bank: this.fund - cash, loan: 0, specialFinance: 0, loanDue: 0, points: 0,
         hotel: 0, vanish: 0, prison: 0, hospital: 0, sleep: 0, sleepwalk: 0, stay: 0, turtle: 0,
@@ -1401,8 +1401,8 @@ export class World implements WorldHooks {
     if (newMonth) {
       // Monthly bank settlement (02 §8.5) for all twelve: 10% on deposits for players without a loan.
       const g0 = this.cities[0];
-      const rows = this.players.filter(p => p.whoPlays).map(p => ({ p: p.id, character: p.character, bank: p.bank, loan: p.loan !== 0, interest: p.loan ? 0 : Math.trunc(p.bank * 0.1) }));
-      for (const p of this.players) if (p.whoPlays && p.loan === 0) p.bank = Math.trunc(p.bank * 1.1);
+      const rows = this.players.filter(p => p.whoPlays).map(p => ({ p: p.id, character: p.character, bank: p.bank, loan: p.loan !== 0, interest: Math.trunc(g0.finance.interestBase(p) * 0.1) }));
+      for (const p of this.players) if (p.whoPlays && p.loan === 0) p.bank += Math.trunc(g0.finance.interestBase(p) * 0.1);
       // One quick nationwide sheet, then 本月全國富豪榜 (top 5 and the human's place, 17 §6).
       const ranking = this.players.filter(p => !p.bankrupt).map(p => ({ p: p.id, wealth: this.wealth(p) })).sort((a, b) => b.wealth - a.wealth || a.p - b.p);
       // The finale plays in chips only (19 §2): no deposits, no bank settlement to show.
@@ -1469,7 +1469,7 @@ export class World implements WorldHooks {
     for (const [i, c] of this.cities.entries()) {
       const self = this;
       const flow = (function* (): Flow {
-        const inner = c.stocks.dividends();
+        const inner = c.stocks.dividends(false);
         let r = inner.next();
         while (!r.done) {
           const s = r.value;
@@ -1487,9 +1487,22 @@ export class World implements WorldHooks {
       if (this.over) return;
     }
     this.mask(this.view());
-    yield { t: 'fx', kind: 'dividends', data: { rows, pay, world: true } };
+    yield { t: 'fx', kind: 'dividends', data: { rows, pay: [...pay], world: true } };
     const h = this.human();
     if (h && pay[h.id]) this.ticker(this.view(), `股票分紅：你${pay[h.id] >= 0 ? '得到' : '支付'}${Math.abs(pay[h.id]).toLocaleString('en-US')}元`, 'dividend', h.id);
+    for (const p of this.players) {
+      if (!p.whoPlays) continue;
+      p.bank += pay[p.id];
+      if (p.bank < 0) {
+        p.cash += p.bank; p.bank = 0;
+        if (p.cash < 0 && !this.cities[0].challenge) {
+          p.cash = 0;
+          const at = p.map !== undefined && p.map >= 0 ? p.map : this.view();
+          yield* this.onCity(at, this.cities[at].bankrupt(p));
+          if (this.over) return;
+        }
+      }
+    }
   }
 }
 
@@ -1497,13 +1510,29 @@ export class World implements WorldHooks {
 export function autoAnswer(s: Ask): Answer {
   switch (s.t) {
     case 'turn': return { dice: s.maxDice };
+    case 'auto-turn': case 'seat': return 0;
     case 'yesno': return false;
     case 'choose': return s.cancellable ? -1 : (s.options.find(o => !o.disabled)?.value ?? s.options[0]?.value ?? 0);
     case 'facility-type': return 1;
     case 'pick-node': case 'pick-city-node': return 0;
     case 'mini-game': return 60;
     case 'slot-machine': case 'wheel': return 39;
-    default: return -1;
+    case 'bank': case 'shop': case 'lottery': case 'black-market': case 'stock-market':
+    case 'pick-map': case 'pick-player': case 'travel': case 'amount':
+      return -1;
+    case 'kb-machine': return { buys: 0, left: s.stored };
+    case 'kb-exchange': return { tools: [], store: false };
+    case 'kb-dice-keep': return Array.from({ length: s.keep }, (_, i) => i);
+    case 'casino':
+      switch (s.phase) {
+        case 'choose': return { game: s.game, stake: s.min };
+        case 'blackjack': return 'stand';
+        case 'holdem': return 'fold';
+      }
+    default: {
+      const _exhaustive: never = s;
+      return _exhaustive;
+    }
   }
 }
 

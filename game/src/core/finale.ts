@@ -256,7 +256,7 @@ export class Finale extends CasinoRules implements WorldHooks {
     const ledger = ledgerOf(w.players) ?? attachLedger(w.players);
     ledger.finish(w);
     const everyone = w.players.map(p => p.id);
-    this.chips = left.map(p => ({ p: p.id, ...chipScore(ledger, p.id, everyone) }));
+    this.chips = left.map((p, k) => ({ p: p.id, ...chipScore(ledger, p.id, everyone, this.valuations[k]) }));
     this.finalists = left.map(p => p.id);
     const avg = this.valuations.reduce((a, v) => a + Math.max(0, v.total), 0) / Math.max(1, left.length);
     this.wealthScale = Math.max(1, Math.round(avg / WEALTH_UNIT));

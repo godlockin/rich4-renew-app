@@ -66,28 +66,32 @@ self.onmessage = async e => {
   } catch (err) { self.postMessage({ id, err: String(err) }); }
 };`;
 
+interface Reply { b: ImageBitmap; x: number; y: number; fw: number; fh: number }
+interface Waiter { ok: (r: Reply) => void; no: (e: Error) => void }
 /** A worker and its queue: at most `IN_FLIGHT` requests are posted at a time, so a request's time limit counts from
  * when the worker gets it, not from when it was queued behind a long clip. */
-interface Lane { w: Worker; busy: number; queue: (() => void)[] }
+interface Lane { w: Worker; busy: number; queue: { post: () => void; no: (e: Error) => void }[]; waiting: Map<number, Waiter> }
 const IN_FLIGHT = 2;
 /** One lane for sprites, one for the ground, one for clips, so a burst of one never holds up another. */
-const lanes = new Map<string, Lane | null>();
+const lanes = new Map<string, Lane>();
 /** Worker failures (no answer in time, or an error the main thread then did not have); at 3 they are given up. */
 let failures = 0;
 let seq = 0;
-interface Reply { b: ImageBitmap; x: number; y: number; fw: number; fh: number }
-const waiting = new Map<number, { ok: (r: Reply) => void; no: (e: Error) => void }>();
 
 const WORKER_MS = 8000, FETCH_MS = 15000;
 
 function lane(name: string): Lane | null {
   if (failures >= 3) return null;
-  if (lanes.has(name)) return lanes.get(name)!;
+  const existing = lanes.get(name);
+  if (existing) return existing;
   let l: Lane | null = null;
   try {
     if (typeof Worker === 'function' && typeof createImageBitmap === 'function') {
       const url = URL.createObjectURL(new Blob([SRC], { type: 'text/javascript' }));
-      const w = new Worker(url);
+      let w: Worker;
+      try { w = new Worker(url); } finally { URL.revokeObjectURL(url); }
+      const waiting = new Map<number, Waiter>();
+      const cur: Lane = { w, busy: 0, queue: [], waiting };
       w.onmessage = (e: MessageEvent<{ id: number; b?: ImageBitmap; err?: string; x?: number; y?: number; fw?: number; fh?: number }>) => {
         const p = waiting.get(e.data.id);
         if (!p) { e.data.b?.close(); return; }
@@ -96,18 +100,20 @@ function lane(name: string): Lane | null {
         else p.no(new Error(e.data.err ?? 'decode'));
       };
       w.onerror = () => {
-        failures = 3;
+        failures++;
+        if (lanes.get(name) === cur) lanes.delete(name);
+        try { w.terminate(); } catch { /* ignore */ }
+        // Drain queued items before rejecting in-flight ones so `next()` never posts to the dead worker.
+        const queued = cur.queue.splice(0);
         const all = [...waiting.values()];
         waiting.clear();
         for (const p of all) p.no(new Error('worker'));
-        // Whatever is still queued goes to the main thread (the lane is no longer used).
-        lanes.set(name, null);
-        if (l) for (const post of l.queue.splice(0)) post();
+        for (const q of queued) q.no(new Error('worker'));
       };
-      l = { w, busy: 0, queue: [] };
+      l = cur;
+      lanes.set(name, cur);
     }
   } catch { l = null; }
-  lanes.set(name, l);
   return l;
 }
 
@@ -127,12 +133,12 @@ function ask(l: Lane, url: string, blob: Blob, size: Size | undefined, cut: bool
     const post = () => {
       l.busy++;
       const id = ++seq;
-      const next = () => { l.busy--; l.queue.shift()?.(); };
-      const timer = setTimeout(() => { if (waiting.delete(id)) { next(); no(new Error('worker timeout')); } }, WORKER_MS);
-      waiting.set(id, { ok: r => { clearTimeout(timer); next(); ok(r); }, no: e => { clearTimeout(timer); next(); no(e); } });
+      const next = () => { l.busy--; l.queue.shift()?.post(); };
+      const timer = setTimeout(() => { if (l.waiting.delete(id)) { next(); no(new Error('worker timeout')); } }, WORKER_MS);
+      l.waiting.set(id, { ok: r => { clearTimeout(timer); next(); ok(r); }, no: e => { clearTimeout(timer); next(); no(e); } });
       l.w.postMessage({ id, blob, w: size?.w, h: size?.h, cut });
     };
-    if (l.busy < IN_FLIGHT) post(); else l.queue.push(post);
+    if (l.busy < IN_FLIGHT) post(); else l.queue.push({ post, no });
   }));
 }
 

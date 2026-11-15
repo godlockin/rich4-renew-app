@@ -683,6 +683,40 @@ export class SmartAi {
       [g.cards.aiArg0, g.cards.aiArg1] = before;
     }
 
+    // 大富豪模式 cards: 31 飛行卡, 32 電車卡, 33 遣返卡, 34 獨裁卡, 35 召集卡, 36 通緝卡, 39 複製卡.
+    if (g.world) {
+      for (const id of [31, 32]) {
+        if (!has(id)) continue;
+        const before = [g.cards.aiArg0, g.cards.aiArg1];
+        if (this.classicWants(p, id)) { const a0 = g.cards.aiArg0, a1 = g.cards.aiArg1; card(id, 3000 * PI, a0, a1); }
+        [g.cards.aiArg0, g.cards.aiArg1] = before;
+      }
+      if (has(33)) for (const q of rivals) {
+        if (q.cards.includes(21)) continue;
+        const w = (g.wealth(q) / Math.max(1, g.wealth(p))) * this.weight(p, q.id, lead) * (q.cards.includes(19) ? 0.3 : 1);
+        card(33, w * 4000 * PI - 2000 * PI, q.id);
+      }
+      if (has(34) && this.classicWants(p, 34)) card(34, 6000 * PI, 0);
+      if (has(35) && this.classicWants(p, 35)) card(35, 4500 * PI, 0);
+      if (has(36)) {
+        let best = -1, bestScore = 0;
+        for (const o of g.world.hooks.wantedOptions(p)) {
+          if (o.disabled) continue;
+          const q = g.players[o.value];
+          if (!q || !this.rival(p, q) || q.cards.includes(21)) continue;
+          const w = (g.wealth(q) / Math.max(1, g.wealth(p))) * this.weight(p, q.id, lead) * (q.cards.includes(19) ? 0.3 : 1);
+          const s = w * 4500 * PI - 1500 * PI;
+          if (s > bestScore) { bestScore = s; best = q.id; }
+        }
+        if (best >= 0) card(36, bestScore, best);
+      }
+      if (has(39)) {
+        const before = [g.cards.aiArg0, g.cards.aiArg1];
+        if (this.classicWants(p, 39)) { const a0 = g.cards.aiArg0, a1 = g.cards.aiArg1; card(39, 7500 * PI, a0, a1); }
+        [g.cards.aiArg0, g.cards.aiArg1] = before;
+      }
+    }
+
     // 挑戰模式: 轉向卡 on a rival in view, 同盟卡 with the first other player, when a task counts them.
     if (cb && has(6) && rivals.length) card(6, -1500 * PI, rivals[0].id);
     if (cb && has(29) && !p.ally) { const q = g.living().find(x => x.id !== p.id); if (q) card(29, -2000 * PI, q.id); }
@@ -756,11 +790,35 @@ export class SmartAi {
     for (const t of [7, 13]) if (p.tools[t - 1] > 0) { const b = this.bestBlast(p, t === 13, lead); tool(t, b.v - (t === 13 ? 15000 : 5000) * PI, b.node); }
     // 4 定時炸彈, 11 傳送機, 12 工程車: the original's judgement.
     for (const t of [4, 11, 12]) if (p.tools[t - 1] > 0) { const param = g.tools.judgeFor(p, t); if (param !== null) tool(t, 2000 * PI, param); }
+    // 大富豪模式 lab tools: 14 超級工人, 15 洲際飛彈, 16 時空機.
+    if (g.world) {
+      if (p.tools[13] > 0) {
+        let best = 0, v = 0;
+        const extra = g.rules?.workerExtra?.(14) ?? 1;
+        for (const r of view) {
+          const x = this.plot(r)!;
+          if (x.owner !== p.id + 1) continue;
+          let gain = 0;
+          if (r < 4000) {
+            const l = x as Land;
+            if (!l.chain && l.level < 5) gain = (this.lotToll(l, Math.min(5, l.level + 1 + extra)) - this.lotToll(l, l.level)) * this.LANDINGS;
+          } else {
+            const f = x as Facility, maxLv = FAC_MAX[f.type] ?? 5;
+            if (f.level < maxLv) gain = (f.level ? this.facToll(f, Math.min(maxLv, f.level + 1 + extra)) - this.facToll(f, f.level) : 3000 * PI * (1 + extra)) * this.LANDINGS;
+          }
+          if (gain > v) { v = gain; best = r; }
+        }
+        if (best) tool(14, v - 1000 * PI, best);
+      }
+      if (p.tools[14] > 0) { const param = g.tools.judgeFor(p, 15); if (param !== null) tool(15, 10000 * PI, param); }
+      if (p.tools[15] > 0) { const param = g.tools.judgeFor(p, 16); if (param !== null) tool(16, 4000 * PI, param); }
+    }
     return out;
   }
 
   /** The original computer's wish to play card `id` (its own rule, no personality limit); sets aiArg0 / aiArg1. */
   private classicWants(p: Player, id: number): boolean {
+    if (this.g.rules?.aiPlayCard?.(this.g, p, id)) return true;
     return this.g.cards.judgeFor(p, id);
   }
 
@@ -819,10 +877,10 @@ export class SmartAi {
 interface Act { score: number; run: () => Flow<unknown> }
 /** The 440 × 440 view (±220 px). */
 const VIEW = 220;
-const TOOL_NAMES = ['機器娃娃', '路障', '地雷', '定時炸彈', '機車', '汽車', '飛彈', '遙控骰子', '機器工人', '時光機', '傳送機', '工程車', '核子飛彈'];
+const TOOL_NAMES = ['機器娃娃', '路障', '地雷', '定時炸彈', '機車', '汽車', '飛彈', '遙控骰子', '機器工人', '時光機', '傳送機', '工程車', '核子飛彈', '超級工人', '洲際飛彈', '時空機'];
 /** Prices in points (cards.ts CARDS, tools.ts TOOLS), what 搶奪卡 weighs. */
 const CARD_POINTS = [200, 200, 35, 25, 20, 20, 15, 20, 160, 180, 60, 15, 25, 20, 100, 25, 20, 20, 40, 25, 25, 10, 20, 50, 30, 35, 35, 35, 40, 70];
-const TOOL_POINTS = [15, 30, 25, 25, 80, 150, 100, 30, 30, 40, 95, 150, 250];
+const TOOL_POINTS = [15, 30, 25, 25, 80, 150, 100, 30, 30, 40, 95, 150, 250, 60, 400, 160];
 /** What the shop buys, in order: [kind, id, most held]. */
 const SHOP_WISHES: readonly (readonly ['card' | 'tool', number, number])[] = [
   ['tool', 8, 4], ['tool', 6, 1], ['card', 20, 2], ['card', 21, 1], ['card', 28, 2], ['card', 19, 1], ['card', 14, 2],

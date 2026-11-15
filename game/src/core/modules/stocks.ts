@@ -9,7 +9,7 @@ import type { Company } from '../board';
 import { day as dayOf, daysBetween, weekday } from '../date';
 import { CHARACTERS } from '../characters';
 import { ask, type Flow } from '../flow';
-import type { Game } from '../game';
+import { FACILITY_MAX_LEVEL, type Game } from '../game';
 import type { Player } from '../types';
 import { WheelKind } from './wheel';
 
@@ -127,10 +127,6 @@ export function trendOf(s: Stock): Trend {
   return Trend.Flat;
 }
 
-/** Facility level caps by type (ref_00474940), copied from the core to avoid an import cycle. */
-const FACILITY_MAX = [1, 5, 5, 1, 5, 5, 5, 5, 5, 5]; // + 5..9 大富翁城's halls (docs/rules/19)
-/** The same with 10..13 歌舞伎町's shops (docs/rules/21), as the core's FACILITY_MAX_LEVEL (REMAKE_FREE_BUILD). */
-const FACILITY_TOP = [...FACILITY_MAX, 5, 5, 5, 5];
 /** Fee names by company category (ref_0047528e → ref_0047517c, 02 §6). */
 const FEE_NAME: Record<number, string> = { 1: '旅遊費', 3: '電腦費', 4: '保險費', 5: '修車費', 6: '加油費', 11: '工程費', 12: '過路費' };
 
@@ -449,7 +445,7 @@ export class Stocks {
   // ---------------------------------------------------------------- dividends (03 §6.2)
 
   /** Day 15: company dividends fcn_0042ba97, also on market holidays; negative surplus is charged. */
-  *dividends(): Flow {
+  *dividends(settle = true): Flow<number[]> {
     const g = this.g;
     const pay = g.players.map(() => 0);
     // One row per linked stock for the 「上市公司分紅」 table (rich4_ui_stock.asm:3052-3330): every player's share
@@ -471,14 +467,17 @@ export class Stocks {
       if (total) c.fundA = 0;
     });
     yield { t: 'fx', kind: 'dividends', data: { rows, pay: [...pay] } };
-    for (const p of g.players) {
-      if (!p.whoPlays) continue;
-      p.bank += pay[p.id];
-      if (p.bank < 0) {
-        p.cash += p.bank; p.bank = 0;
-        if (p.cash < 0 && !g.challenge) { p.cash = 0; yield* g.bankrupt(p); if (g.over) return; }
+    if (settle) {
+      for (const p of g.players) {
+        if (!p.whoPlays) continue;
+        p.bank += pay[p.id];
+        if (p.bank < 0) {
+          p.cash += p.bank; p.bank = 0;
+          if (p.cash < 0 && !g.challenge) { p.cash = 0; yield* g.bankrupt(p); if (g.over) return pay; }
+        }
       }
     }
+    return pay;
   }
 
   // ---------------------------------------------------------------- computer (03 §9)
@@ -807,7 +806,7 @@ export class Stocks {
     const me = p.id + 1, refs: number[] = [], all = this.g.remakeFreeBuild;
     this.g.board.lands.forEach((l, i) => { if (l.owner === me && (l.chain ? l.level < 1 : l.level < 5)) refs.push(2001 + i); });
     this.g.board.facilities.forEach((f, i) => {
-      if (f.owner === me && (all ? f.level === 0 || f.level < FACILITY_TOP[f.type] : f.level >= 1 && f.level < FACILITY_MAX[f.type])) refs.push(4001 + i);
+      if (f.owner === me && (all ? f.level === 0 || f.level < FACILITY_MAX_LEVEL[f.type] : f.level >= 1 && f.level < FACILITY_MAX_LEVEL[f.type])) refs.push(4001 + i);
     });
     return refs;
   }

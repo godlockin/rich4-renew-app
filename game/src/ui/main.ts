@@ -186,7 +186,7 @@ function title() {
   audio.setMusicSet(null); // the title and everything outside 激情歲月 play the original's music
   if (audio.music?.kind !== 'theme' || audio.music.index !== Theme.title) audio.theme(Theme.title, true);
   app.innerHTML = `<div class="title" style="${bg ? `--title-bg:url('${abs(bg.src)}');` : ''}${tall ? `--title-bg-tall:url('${abs(tall.src)}')` : ''}">
-    <button class="title-cards" data-act="cards" aria-label="圖鑑"><img class="tc-icon" src="${ASSETS}/maps/remake/challenge/icon.webp" alt=""><img class="tc-label hant" src="${ASSETS}/maps/remake/challenge/label-hant.webp" alt=""><img class="tc-label hans" src="${ASSETS}/maps/remake/challenge/label-hans.webp" alt=""></button>
+    <button class="title-cards" data-act="cards" aria-label="圖鑑"><img class="tc-icon" src="${ASSETS}/maps/remake/challenge/icon.webp" alt=""><span class="tc-label hant" style="margin-top:-14%;padding:2px 10px;border-radius:999px;background:linear-gradient(#ffe580,#d99a1e);border:2px solid #fff3c4;color:#4a2300;font-weight:800;font-size:13px;line-height:1.2;box-shadow:0 2px 4px rgba(0,0,0,.35)">圖鑑</span><span class="tc-label hans" style="margin-top:-14%;padding:2px 10px;border-radius:999px;background:linear-gradient(#ffe580,#d99a1e);border:2px solid #fff3c4;color:#4a2300;font-weight:800;font-size:13px;line-height:1.2;box-shadow:0 2px 4px rgba(0,0,0,.35)">图鉴</span></button>
     <div class="title-buttons">${btn('start', 1, '開始遊戲')}${party}${btn('load', 3, '讀取進度')}${btn('option', 5, '設定')}</div>
     <div class="title-note">${phrases('這款遊戲是大家一起完成的，感謝 GitHub 回報問題的朋友和 B 站留言區的每一條意見。')}</div>
     <div class="title-ver">v${__APP_VERSION__}</div></div>`;

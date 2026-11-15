@@ -128,10 +128,19 @@ export function* playReward(g: Game, p: Player, seq: number, test?: string, test
       let sum = 0;
       for (const q of rivals) {
         const x = Math.min(n, Math.max(0, q.points));
-        q.points -= x; p.points += x; sum += x;
+        if (x > 0) {
+          q.points -= x;
+          yield { t: 'points', p: q.id, amount: -x };
+          const got = Math.min(0xffff - p.points, x);
+          p.points += got;
+          sum += got;
+        }
         lines.push({ p: q.id, text: x ? `交出 ${x} 點券` : '沒有點券' });
       }
-      if (sum) lines.push({ p: p.id, text: `共收到 ${sum} 點券` });
+      if (sum) {
+        yield { t: 'points', p: p.id, amount: sum };
+        lines.push({ p: p.id, text: `共收到 ${sum} 點券` });
+      }
       break;
     }
     case 'RW07': case 'RW08': { // prison / hospital n days, as a fate's misfortune (06 §2.2)

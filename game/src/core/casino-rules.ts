@@ -374,7 +374,7 @@ export abstract class CasinoRules implements MapRules {
     const lo = Math.min(this.minStake(level), Math.min(cap, have)), hi = free ? lo : Math.min(cap, have);
     let choice: CasinoChoice;
     if (human) {
-      const a = (yield ask({ t: 'casino', p: p.id, phase: 'choose', game, hall: HALL_NAMES[f.type], banker: banker.id, facility: f.id, name: f.name, level, cap, min: lo, max: hi, mult: this.blind(), cash: p.cash + p.bank, fee, godLine, free } as never)) as unknown as CasinoChoice | undefined;
+      const a = (yield ask({ t: 'casino', p: p.id, phase: 'choose', game, hall: HALL_NAMES[f.type], banker: banker.id, facility: f.id, name: f.name, level, cap, min: lo, max: hi, mult: this.blind(), cash: p.cash + p.bank, fee, godLine, free })) as CasinoChoice | undefined;
       choice = this.validChoice(game, a, lo, hi) ?? this.aiChoice(rng, game, p, lo, hi);
     } else choice = this.aiChoice(rng, game, p, lo, hi, god);
     // 福神 / 衰神 (19 §5.6): the outcome they force, the table dealt to match it (C.rigged and friends).
@@ -472,7 +472,7 @@ export abstract class CasinoRules implements MapRules {
         while (!t.done) {
           let m: C.BjMove;
           if (human) {
-            const a = (yield ask({ t: 'casino', p: p.id, phase: 'blackjack', player: [...t.player], up: t.dealer[0], canDouble: t.player.length === 2 && extra > 0, double: extra, stake: c.stake } as never)) as unknown;
+            const a = yield ask({ t: 'casino', p: p.id, phase: 'blackjack', player: [...t.player], up: t.dealer[0], canDouble: t.player.length === 2 && extra > 0, double: extra, stake: c.stake });
             m = a === 'hit' || a === 'stand' || a === 'double' ? a : C.bjBasic(t.player, t.dealer[0]);
           } else m = C.bjBasic(t.player, t.dealer[0]);
           if (m === 'double' && (extra <= 0 || t.player.length !== 2)) m = 'hit';
@@ -487,7 +487,7 @@ export abstract class CasinoRules implements MapRules {
         let call: boolean;
         if (extra <= 0 || (!human && rig === 'win')) call = true; // all-in on the ante: the showdown costs nothing more
         else if (human) {
-          const a = (yield ask({ t: 'casino', p: p.id, phase: 'holdem', hole: [...t.hole], board: [...t.board], stake: c.stake, call: extra } as never)) as unknown;
+          const a = yield ask({ t: 'casino', p: p.id, phase: 'holdem', hole: [...t.hole], board: [...t.board], stake: c.stake, call: extra });
           call = a === 'call' ? true : a === 'fold' ? false : C.holdemCall(t);
         } else call = C.holdemCall(t);
         return C.holdemSettleFor(t, c.stake, call, extra, rig, rng);

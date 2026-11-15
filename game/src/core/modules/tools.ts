@@ -10,7 +10,7 @@
  */
 import type { Flow } from '../flow';
 import { ask } from '../flow';
-import type { Game } from '../game';
+import { FACILITY_MAX_LEVEL, type Game } from '../game';
 import { CHARACTERS } from '../characters';
 import type { Option, PickSpot, Player } from '../types';
 import { COPY_CARD, deckSupply, TYCOON_SHOP_ALWAYS } from './cards';
@@ -83,9 +83,6 @@ export const CONSTRUCTION_TRAFFIC = 0x1f;
 const AI_SHOP_ORDER = [8, 2, 7, 1, 4, 3];
 const VIEW_HALF = 220;
 const MISSILE_HALF = 100;
-/** Facility level caps by type (ref_00474940). */
-const FACILITY_MAX = [1, 5, 5, 1, 5, 5, 5, 5, 5, 5]; // + 5..9 大富翁城's halls (docs/rules/19)
-FACILITY_MAX[14] = 5; // 激情歲月's 宣傳站 (docs/rules/24 §2.4); 10..13 stay as they were
 /** Objects that hurt whoever stops on them (remote dice AI, 05 §10.1.3). */
 const HARMFUL = new Set([5, 6, 7, 8, 10, 11, 16, 17, 18]);
 /** Lab options 1..5 (05 §7). */
@@ -1057,7 +1054,7 @@ export class Tools {
       if (l.tolls[l.level] > score) { score = l.tolls[l.level]; best = l.id + 2000; }
     }
     for (const f of g.board.facilities) {
-      if (f.owner !== me || f.level >= FACILITY_MAX[f.type] || !this.inView(p, f.x, f.y)) continue;
+      if (f.owner !== me || f.level >= FACILITY_MAX_LEVEL[f.type] || !this.inView(p, f.x, f.y)) continue;
       if (f.fees[f.level] > score) { score = f.fees[f.level]; best = f.id + 4000; }
     }
     return best;

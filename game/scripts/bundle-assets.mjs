@@ -16,10 +16,10 @@ let count = 0, bytes = 0;
 
 /** 判斷資源相對路徑所屬分包（base 為主包，其餘為按需 DLC 分包）。 */
 function packOf(rel) {
-  if (/^maps\/remake\/(?:map-10[0-4]\.|10[0-4](?:\/|-)|events\/|onway\/|sprites\/(?:150[1-3]|901[78]|27\d\d|28\d\d|29\d\d|30\d\d|31\d\d)\/)/.test(rel)) return 'tycoon';
-  if (/^maps\/remake\/(?:map-106\.|106(?:\/|-)|kabukicho\/|sprites\/19\d\d\/|tools\/061[78]\.|cards\/060[78]\.)/.test(rel)) return 'kabukicho';
-  if (/^maps\/remake\/(?:map-107\.|107(?:\/|-)|jiqing\/)/.test(rel)) return 'jiqing';
-  if (/^maps\/remake\/(?:map-105\.|105(?:\/|-)|casino\/|sprites\/16\d\d\/)/.test(rel)) return 'finale';
+  if (/^maps\/remake\/(?:map-10[0-4]\.|10[0-4](?:\/|-)|(?:tokyo|osaka|sapporo|kyushu|okinawa)(?:\.|-)|events\/|onway\/|sprites\/(?:1[0-4]\d\d|150[1-3]|2[0-4]\d\d|2[7-9]\d\d|3[01]\d\d|901[78])\/)/.test(rel) || /^ground\/10[0-4]\//.test(rel)) return 'tycoon';
+  if (/^maps\/remake\/(?:map-106\.|106(?:\/|-)|kabukicho(?:\.|-|\/)|sprites\/(?:17\d\d|18\d\d|19\d\d|25\d\d|90(?:19|20))\/|tools\/061[78]\.|cards\/060[78]\.)/.test(rel) || /^ground\/106\//.test(rel)) return 'kabukicho';
+  if (/^maps\/remake\/(?:map-107\.|107(?:\/|-)|jiqing(?:\.|-|\/)|sprites\/(?:3[2-6]\d\d|91\d\d)\/)/.test(rel) || /^ground\/107\//.test(rel)) return 'jiqing';
+  if (/^maps\/remake\/(?:map-105\.|105(?:\/|-)|finale(?:\.|-)|casino\/|sprites\/16\d\d\/)/.test(rel) || /^ground\/105\//.test(rel)) return 'finale';
   if (/^maps\/remake\/challenge\//.test(rel)) return 'challenge';
   return 'base';
 }
@@ -249,6 +249,7 @@ if (existsSync(join(src, 'ground/index.json'))) {
   for (const [map, styles] of Object.entries(g.maps ?? {})) {
     for (const style of styles) {
       const dir = `ground/${map}/${style}`;
+      if (!include(`${dir}/manifest.json`)) continue;
       if (!existsSync(join(src, dir, 'manifest.json'))) continue;
       const m = json(`${dir}/manifest.json`);
       // The tiles smaller by SHRINK: their pixels per original pixel (scale) with them.

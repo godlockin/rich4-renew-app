@@ -723,7 +723,7 @@ export class KabukichoRules implements MapRules {
       const maxBuys = Math.min(M.MAX_BUYS, Math.floor(p.points / M.BUY_POINTS));
       const seed = rng.rand() * 32768 + rng.rand();
       const stored = kind === 'pachinko' ? this.s.tama[p.id] : this.s.medals[p.id];
-      const a = (yield ask({ t: 'kb-machine', p: p.id, kind, maxBuys, seed, boost, stored, points: p.points } as never)) as unknown as { buys?: number; left?: number; a?: number; b?: number; played?: number } | undefined;
+      const a = (yield ask({ t: 'kb-machine', p: p.id, kind, maxBuys, seed, boost, stored, points: p.points })) as { buys?: number; left?: number; a?: number; b?: number; played?: number } | undefined;
       buys = Math.max(0, Math.min(maxBuys, Math.trunc(Number(a?.buys) || 0)));
       left = Math.max(0, Math.trunc(Number(a?.left) || 0));
       if (stored) { if (kind === 'pachinko') this.s.tama[p.id] = 0; else this.s.medals[p.id] = 0; }
@@ -777,7 +777,7 @@ export class KabukichoRules implements MapRules {
         const stock = id <= 8 ? g.tools.shopStock[id - 1] ?? 0 : 99;
         return { id, name: d.name, price: d.price, card, have, max: card ? HAND_LIMIT - p.cards.length : Math.min(9 - have, stock), stock };
       });
-      const a = (yield ask({ t: 'kb-exchange', p: p.id, kind, left, per, value, sale: this.mod('exchange'), options } as never)) as unknown as { tools?: number[]; store?: boolean } | undefined;
+      const a = (yield ask({ t: 'kb-exchange', p: p.id, kind, left, per, value, sale: this.mod('exchange'), options })) as { tools?: number[]; store?: boolean } | undefined;
       for (const id of Array.isArray(a?.tools) ? a!.tools! : []) take(Number(id));
       if (a?.store && value > 0) {
         const keep = value * per + (left % per);
@@ -958,7 +958,7 @@ export class KabukichoRules implements MapRules {
     let drop: number;
     if (g.isHuman(p)) {
       // The dice as faces: the player taps the ones to keep (n of n + 1, screen kb-dice-keep); the other is dropped.
-      const a = (yield ask({ t: 'kb-dice-keep', p: p.id, values: vals, keep: vals.length - 1 } as never)) as unknown;
+      const a = yield ask({ t: 'kb-dice-keep', p: p.id, values: vals, keep: vals.length - 1 });
       const kept = Array.isArray(a) ? [...new Set(a.map(Number).filter(i => i >= 0 && i < vals.length))] : [];
       drop = kept.length === vals.length - 1 ? vals.findIndex((_, i) => !kept.includes(i)) : 0;
     } else {
