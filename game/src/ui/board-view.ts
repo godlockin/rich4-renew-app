@@ -1027,7 +1027,14 @@ export class BoardView {
   private demolishWait: { id: number; done: () => void } | null = null;
 
   /** Lots keep the look they had when this was called, until `thawLots()` (a clip's redraw frame). */
-  freezeLots() { this.lotsFrozen = true; }
+  freezeLots() {
+    this.lotsFrozen = true;
+    const b = this.game.board;
+    this.lotSnap = {
+      lands: b.lands.map(l => ({ level: l.level, chain: l.chain, owner: l.owner })),
+      facilities: b.facilities.map(f => ({ level: f.level, type: f.type, owner: f.owner })),
+    };
+  }
   thawLots() { this.lotsFrozen = false; }
   private lotsFrozen = false;
   private lotSnap: { lands: { level: number; chain: number | boolean; owner: number }[]; facilities: { level: number; type: number; owner: number }[] } = { lands: [], facilities: [] };
@@ -1337,6 +1344,11 @@ export class BoardView {
    * Step marks (the remake's own maps): a pale notch across both edges of the road halfway between two squares, so
    * a throw can be counted square by square in every ground style. Drawn on the ground, in world pixels.
    */
+  private visible(x: number, y: number, m = 200) {
+    const p = this.project(x, y);
+    return p.x > -m && p.x < this.W + m && p.y > -m && p.y < this.H + m * 1.5 ? p : null;
+  }
+
   private stepMarks(ctx: CanvasRenderingContext2D) {
     const b = this.game.board;
     ctx.save();
@@ -1350,9 +1362,11 @@ export class BoardView {
         if (!id || id < n.id) continue;
         const m = b.nodes[id - 1];
         if (!m || m.noDrop) continue;
+        const mx = (n.x + m.x) / 2, my = (n.y + m.y) / 2;
+        if (!this.visible(mx, my, 40)) continue;
         const dx = m.x - n.x, dy = m.y - n.y, L = Math.hypot(dx, dy);
         if (L < 1) continue;
-        const mx = (n.x + m.x) / 2, my = (n.y + m.y) / 2, px = -dy / L, py = dx / L;
+        const px = -dy / L, py = dx / L;
         for (const s of [-1, 1]) {
           ctx.moveTo(mx + px * s * 21, my + py * s * 21);
           ctx.lineTo(mx + px * s * 11, my + py * s * 11);
@@ -1392,6 +1406,7 @@ export class BoardView {
     const g = this.game, b = g.board;
     const angle = (ref: number, x: number, y: number) => this.plotAngle(ref, x, y);
     const plate = (ref: number, x: number, y: number, owner: number, side: number) => {
+      if (!this.visible(x, y, side)) return;
       const p = g.players[owner - 1];
       if (!p || p.bankrupt) return;
       const a = angle(ref, x, y), c = Math.cos(a), s = Math.sin(a), h = side / 2;
@@ -1488,10 +1503,7 @@ export class BoardView {
     this.street?.drawGround(ctx); // 歌舞伎町's avenues and rails round the board (docs/rules/21 §8.3)
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    const visible = (x: number, y: number, m = 200) => {
-      const p = this.project(x, y);
-      return p.x > -m && p.x < this.W + m && p.y > -m && p.y < this.H + m * 1.5 ? p : null;
-    };
+    const visible = (x: number, y: number, m = 200) => this.visible(x, y, m);
 
     // 2. Event icons, flat on the ground (map#24, frame aux - 1, never rotated).
     for (const n of b.nodes) {
@@ -1526,10 +1538,9 @@ export class BoardView {
     const ownerColor = (o: number) => (o ? CHARACTERS[g.players[o - 1]?.character ?? 0].color : 0);
 
     // While a clip plays, the lots keep their look until the clip's redraw frame (11 §0.2): draw a snapshot.
-    if (!this.lotsFrozen) this.lotSnap = { lands: b.lands.map(l => ({ level: l.level, chain: l.chain, owner: l.owner })), facilities: b.facilities.map(f => ({ level: f.level, type: f.type, owner: f.owner })) };
     const snap = this.lotsFrozen ? this.lotSnap : null;
     for (const [li, live] of b.lands.entries()) {
-      const l = { ...live, ...snap?.lands[li] };
+      const l = snap ? { ...live, ...snap.lands[li] } : live;
       const p = visible(l.x, l.y);
       if (!p) continue;
       const fr = buildingFrame(l.facing, this.rot);
@@ -1544,7 +1555,7 @@ export class BoardView {
       if (this.highlight === l.id - 1) add(p.y, Layer.zzz + 1, () => this.ring(p.x, p.y));
     }
     for (const [fi, live] of b.facilities.entries()) {
-      const fa = { ...live, ...snap?.facilities[fi] };
+      const fa = snap ? { ...live, ...snap.facilities[fi] } : live;
       const p = visible(fa.x, fa.y, 260);
       if (!p) continue;
       let fr = buildingFrame(0, this.rot);
@@ -1808,7 +1819,7 @@ export class BoardView {
       else if (f) spots.push({ x: f.x, y: f.y, r: 52, up: f.level ? 110 : 40 });
     }
     for (const id of this.markNodes) {
-      const n = b.nodes.find(m => m.id === id);
+      const n = nodeById(b, id);
       if (n) spots.push({ x: n.x, y: n.y, r: 34, up: 76 });
     }
     return spots;

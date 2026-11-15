@@ -12,6 +12,7 @@ import { ask, type Flow } from '../flow';
 import { FACILITY_MAX_LEVEL, type Game } from '../game';
 import type { Player } from '../types';
 import { WheelKind } from './wheel';
+import { isMarketHoliday } from './holidays';
 
 const f32 = Math.fround;
 
@@ -201,9 +202,11 @@ export class Stocks {
     return w;
   }
 
-  /** Is the market open today (03 §4.2)? Sundays close it; holidays join once the holiday table is remade. */
+  /** Is the market open today (03 §4.2)? Sundays and market holidays close it. */
   open(): boolean {
-    return this.restDays === 0 && weekday(this.g.date) !== 0;
+    if (this.restDays !== 0 || weekday(this.g.date) === 0) return false;
+    if (this.g.holidaysEnabled && isMarketHoliday(this.g.date, this.g.mapSlot)) return false;
+    return true;
   }
 
   /** Total shares and share value per player, for news and taxes (06 §4.3 #10, #13). */

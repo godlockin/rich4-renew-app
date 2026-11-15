@@ -8,6 +8,7 @@ import { addDays, day as dayOf, daysBetween, weekday } from '../date';
 import { ask, type Flow } from '../flow';
 import type { Game, MonthReport } from '../game';
 import type { Player } from '../types';
+import { isMarketHoliday } from './holidays';
 
 export class Finance {
   constructor(private readonly g: Game) {}
@@ -114,11 +115,13 @@ export class Finance {
     yield* this.financeReserve(p);
   }
 
-  /** 設定貸款到期日（90 天後，遇週日順延）。 */
+  /** 設定貸款到期日（90 天後，遇週日或假日順延）。 */
   setLoanDue(p: Player): void {
     if (p.loanDue) return;
     let due = addDays(this.g.date, 90);
-    while (weekday(due) === 0) due = addDays(due, 1);
+    while (weekday(due) === 0 || (this.g.holidaysEnabled && isMarketHoliday(due, this.g.mapSlot))) {
+      due = addDays(due, 1);
+    }
     p.loanDue = due;
   }
 

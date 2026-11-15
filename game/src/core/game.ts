@@ -13,6 +13,7 @@ import { Finance } from './modules/finance';
 import { Forks, type ForkWalk } from './modules/forks';
 import { Cards } from './modules/cards';
 import { Events } from './modules/events';
+import { lookupHoliday } from './modules/holidays';
 import { Objects } from './modules/objects';
 import { Places } from './modules/places';
 import { Stocks } from './modules/stocks';
@@ -390,6 +391,8 @@ export class Game {
    * (id ≥ 1000) keep their own id, which matches no slot.
    */
   get mapSlot(): number { return this.settings.mapId >= 8 && this.settings.mapId < 1000 ? this.board.mapId : this.settings.mapId; }
+  /** Classic 24-holiday system (01 §4.4, 06 §10); gated behind `settings.holidays` so classic golden runs stay bit-exact. */
+  get holidaysEnabled(): boolean { return !!this.settings.holidays; }
   name(p: number): string { return playerName(this.players[p]); }
   isHuman(p: Player): boolean { return p.whoPlays === 1 && !p.autopilot; }
   /**
@@ -862,6 +865,18 @@ export class Game {
       if (l.tmpState >> 4) l.tmpState = (l.tmpState >> 4) - 1 ? l.tmpState - 0x10 : 0;
       // Per the bug decision #12 the expiry triggers on or after the date instead of only on it.
       if (l.expire && daysBetween(l.expire, this.date) >= 0) { l.owner = 0; l.expire = 0; }
+    }
+    if (this.holidaysEnabled) {
+      const holiday = lookupHoliday(this.date, this.mapSlot);
+      if (holiday) {
+        yield { t: 'holiday', name: holiday.name, rest: holiday.rest, giftCard: holiday.giftCard };
+        if (holiday.giftCard && !this.rules?.chipsOnly) {
+          for (const p of this.living()) {
+            const id = yield* this.cards.receiveRandom(p);
+            if (id) yield { t: 'fx', kind: 'card-received', p: p.id, data: { card: id } };
+          }
+        }
+      }
     }
     yield { t: 'board' };
   }

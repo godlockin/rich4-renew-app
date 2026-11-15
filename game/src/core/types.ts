@@ -41,6 +41,11 @@ export interface GameSettings {
    * 派對模式預設啟用，單機經典模式預設維持原版相容（可由設定顯式覆蓋）。
    */
   fairFinance?: boolean;
+  /**
+   * Classic 24-holiday system (01 §4.4, 06 §10): market closed & loan due dates postponed on
+   * holidays, plus 1 random card gifted to each living player on marked holidays.
+   */
+  holidays?: boolean;
 }
 
 export const FUNDS = [300000, 200000, 100000, 50000, 30000, 10000];
@@ -265,6 +270,7 @@ export type GameEvent =
   | { t: 'bank'; p: number }
   | { t: 'bankrupt'; p: number }
   | { t: 'day'; date: PackedDate; newMonth: boolean }
+  | { t: 'holiday'; name: string; rest: boolean; giftCard: boolean }
   | { t: 'gameover'; winner: number; code: number }
   /** Presentation-only effect (card used, god appears, explosion …); kind names come from the modules. */
   | { t: 'fx'; kind: string; p?: number; node?: number; target?: number; data?: Record<string, unknown> }

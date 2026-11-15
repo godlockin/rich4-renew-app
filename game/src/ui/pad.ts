@@ -29,6 +29,7 @@ type Source = 'pad' | 'key' | 'native';
 
 /** Native controls and anything marked as a button; the rest is found by `cursor: pointer` (tiles, cells, overlays). */
 const BASE = 'button, a[href], input:not([type=hidden]), select, textarea, summary, [role=button], [tabindex]:not([tabindex="-1"])';
+const INTERACTIVE = 'button, [role="button"], input:not([type=hidden]), select, textarea, summary, a[href], [tabindex]:not([tabindex="-1"]), [data-v], .clickable, .card, .btn';
 /** Layers that hold the input while they show (the first on top wins; the dialog layer over the map before the rest). */
 const MODALS = '.pl-scene:not(.out), .fx-overlay, .slots-overlay, .rd-ov, .tc, .icf, .te-cover, .jq-intro, .shop, .ng';
 
@@ -64,12 +65,16 @@ function disabled(el: HTMLElement): boolean {
   return (el as HTMLButtonElement).disabled === true || el.getAttribute('aria-disabled') === 'true' || !!el.closest('[inert], [hidden]');
 }
 
+let domDirty = true;
+let cachedCollect: { cands: Cand[]; surfaces: HTMLElement[] } | null = null;
+
 /**
  * Everything on screen a tap can reach, in document order: the native controls, plus every element where
  * `cursor: pointer` starts (its children inherit it). Containers of other choices and screen-sized tap surfaces (a
  * notice's "tap anywhere") are left out of the focus; the surfaces are kept for 確定 without a focus.
  */
 function collect(): { cands: Cand[]; surfaces: HTMLElement[] } {
+  if (!domDirty && cachedCollect) return cachedCollect;
   const W = vw(), H = vh();
   const found: HTMLElement[] = [];
   const pointer = new Map<Element, boolean>();
@@ -79,7 +84,7 @@ function collect(): { cands: Cand[]; surfaces: HTMLElement[] } {
     if (v === undefined) { v = getComputedStyle(e).cursor === 'pointer'; pointer.set(e, v); }
     return v;
   };
-  for (const e of document.body.querySelectorAll<HTMLElement>('*')) {
+  for (const e of document.body.querySelectorAll<HTMLElement>(INTERACTIVE)) {
     if (e.matches(BASE)) { found.push(e); continue; }
     if (e instanceof SVGElement || e.tagName === 'IMG' || e.tagName === 'CANVAS' && e.classList.contains('board')) continue;
     if (isPointer(e) && !isPointer(e.parentElement)) found.push(e);
@@ -107,7 +112,9 @@ function collect(): { cands: Cand[]; surfaces: HTMLElement[] } {
   const inner = new Set<Element>();
   const set = new Set(cands.map(c => c.el));
   for (const c of cands) for (let p = c.el.parentElement; p; p = p.parentElement) if (set.has(p)) inner.add(p);
-  return { cands: cands.filter(c => !inner.has(c.el)), surfaces };
+  cachedCollect = { cands: cands.filter(c => !inner.has(c.el)), surfaces };
+  domDirty = false;
+  return cachedCollect;
 }
 
 /** Whether `el` is what shows at some of its points (not covered by something on top). */
@@ -781,6 +788,23 @@ function install() {
   window.addEventListener('touchstart', off, { capture: true, passive: true });
   window.addEventListener('gamepadconnected', () => { padsSeen = true; wake(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
+  window.addEventListener('resize', () => { domDirty = true; }, { passive: true });
+  window.addEventListener('scroll', () => { domDirty = true; }, { capture: true, passive: true });
+  if (typeof MutationObserver !== 'undefined' && document.body) {
+    new MutationObserver(muts => {
+      for (const m of muts) {
+        const t = m.target as Element | null;
+        if (t?.closest?.('.pad-ring, .pad-hint')) continue;
+        domDirty = true;
+        break;
+      }
+    }).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden', 'disabled', 'aria-disabled', 'inert'],
+    });
+  }
   // Android: the controller's back key (B as the system's back) comes here instead of closing the app.
   (window as unknown as { __rich4PadBack?: () => boolean }).__rich4PadBack = () => {
     if (performance.now() - lastBack < 300) return true; // the same press already seen as the pad's B
