@@ -101,6 +101,12 @@ export interface PartyRules {
    * takes a computer's seat over at its next turn (settings.dropIn, the 'seat' question); 0 off.
    */
   dropIn: number;
+  /** 24節假日 (settings.holidays): 1 on, 0 or omitted off. */
+  holidays?: number;
+  /** 角色天賦 (settings.traits): 1 on, 0 or omitted off. */
+  traits?: number;
+  /** 2v2 同盟 (settings.teams): 1 on (4 players -> [1, 1, 2, 2]), 0 or omitted off. */
+  teams?: number;
 }
 export const AI_LEVELS = ['簡單', '中等', '困難', '地獄'];
 /** 等待時間's choices: quick players 10 s, patient ones up to 60 s (the clock as it always was). */
@@ -114,8 +120,13 @@ export const DEFAULT_RULES: Readonly<PartyRules> = { fundIndex: 1, traffic: 0, l
 /** Rules as kept: each a whole number in its range, else the default. */
 export function cleanRules(r: unknown): PartyRules {
   const o = (r ?? {}) as Record<string, unknown>;
-  const at = (k: keyof PartyRules, n: number) => { const v = o[k]; return Number.isInteger(v) && (v as number) >= 0 && (v as number) < n ? v as number : DEFAULT_RULES[k]; };
-  return { fundIndex: at('fundIndex', 6), traffic: at('traffic', 3) as 0 | 1 | 2, landLimitIndex: at('landLimitIndex', 6), daysLimitIndex: at('daysLimitIndex', 6), victoryIndex: at('victoryIndex', 6), challenge: at('challenge', PARTY_CHALLENGE.length), maxPing: at('maxPing', PING_LIMITS.length), turnSec: at('turnSec', TURN_SECONDS.length), aiLevel: at('aiLevel', AI_LEVELS.length), dropIn: at('dropIn', 2) };
+  const at = (k: keyof Omit<PartyRules, 'holidays' | 'traits' | 'teams'>, n: number) => { const v = o[k]; return Number.isInteger(v) && (v as number) >= 0 && (v as number) < n ? v as number : DEFAULT_RULES[k]; };
+  return {
+    fundIndex: at('fundIndex', 6), traffic: at('traffic', 3) as 0 | 1 | 2, landLimitIndex: at('landLimitIndex', 6), daysLimitIndex: at('daysLimitIndex', 6), victoryIndex: at('victoryIndex', 6), challenge: at('challenge', PARTY_CHALLENGE.length), maxPing: at('maxPing', PING_LIMITS.length), turnSec: at('turnSec', TURN_SECONDS.length), aiLevel: at('aiLevel', AI_LEVELS.length), dropIn: at('dropIn', 2),
+    ...(o.holidays === 1 ? { holidays: 1 } : {}),
+    ...(o.traits === 1 ? { traits: 1 } : {}),
+    ...(o.teams === 1 ? { teams: 1 } : {}),
+  };
 }
 /** What the host sends when the game starts. */
 export interface StartMsg { settings: import('../core/types').GameSettings; seats: Record<string, number> }
@@ -128,10 +139,20 @@ export function startMsg(r: Room, fill: number, startDate: number, seed: number)
   const cpus = fill ? [0, 4, 3, 1, 2, 5, 6, 7, 8, 10, 11, 9].filter(c => !used.has(c)).slice(0, Math.max(0, fill - r.members.length)) : [];
   const players = [...r.members.map(m => ({ character: m.character, human: true, ...(m.nick ? { nick: m.nick } : {}) })), ...cpus.map(c => ({ character: c, human: false }))];
   // 挑戰模式 is the task cards and 獎勵卡 (docs/rules/30; never 大富翁城); the limits are the room's, not the game's.
-  const { challenge, maxPing, turnSec, aiLevel, dropIn, ...rules } = r.rules;
+  const { challenge, maxPing, turnSec, aiLevel, dropIn, holidays, traits, teams, ...rules } = r.rules;
   void maxPing; void turnSec;
   const tasks = challenge && Number(r.map) !== FINALE_MAP ? { monthTasks: challenge as 1 | 2 | 3 } : {};
-  return { settings: { mapId: Number(r.map), players, ...rules, aiLevel: aiLevel as 0 | 1 | 2 | 3, ...tasks, ...(dropIn ? { dropIn: true } : {}), startDate, seed, party: true }, seats: Object.fromEntries(r.members.map((m, i) => [m.id, i])) };
+  return {
+    settings: {
+      mapId: Number(r.map), players, ...rules, aiLevel: aiLevel as 0 | 1 | 2 | 3, ...tasks,
+      ...(dropIn ? { dropIn: true } : {}),
+      ...(holidays ? { holidays: true } : {}),
+      ...(traits ? { traits: true } : {}),
+      ...(teams && players.length === 4 ? { teams: [1, 1, 2, 2] } : {}),
+      startDate, seed, party: true,
+    },
+    seats: Object.fromEntries(r.members.map((m, i) => [m.id, i])),
+  };
 }
 
 type Msg =

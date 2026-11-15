@@ -20,7 +20,7 @@ import { InfoScreen } from './info';
 import { askScreens, closeStuckScreens, fxScreens } from './screens/registry';
 import { PartyBar } from './party-chat';
 import { openParty } from './party';
-import { RULE_ITEMS, RULE_LABELS } from './rule-options';
+import { EXTRA_RULE_ITEMS, EXTRA_RULE_LABELS, RULE_ITEMS, RULE_LABELS } from './rule-options';
 import { Lobby, TURN_SECONDS, type Room } from './party-net';
 import { AUTO_SLOT, TYCOON_AUTO_SLOT, interruptedLoad, loadSlot, markLoading, notice, pickSlot, writeAuto, writeSlot, type Loaded } from './saves';
 import { lowerTier } from './mem-tier';
@@ -66,7 +66,8 @@ import { setWeatherMode, WEATHER_MODES, weatherMode } from './weather';
 import { initLang, lang, LANGS, setLang } from './lang';
 import { attachLedger, gameResults, ledgerOf, worldResults } from '../core/stats';
 import { CHALLENGE_MAPS, CHALLENGE_YEARS } from '../core/challenge';
-import { ChallengeBar, MonthWatch, monthNotice, StarWatch, starTable, taskList } from './challenge';
+import { createPuzzleGame, evaluatePuzzle, type PuzzleDef } from '../core/puzzle';
+import { ChallengeBar, MonthWatch, monthNotice, openWeeklyPuzzle, puzzleResultNode, StarWatch, starTable, taskList } from './challenge';
 import { monthlyById } from '../core/monthly';
 import { achievementScene, earnCards, openCollection, proofShot, type Earned, type Evidence } from './collection';
 import { itemIconSrc } from './screens/item-text';
@@ -189,6 +190,7 @@ function title() {
   audio.setMusicSet(null); // the title and everything outside 激情歲月 play the original's music
   if (audio.music?.kind !== 'theme' || audio.music.index !== Theme.title) audio.theme(Theme.title, true);
   app.innerHTML = `<div class="title" style="${bg ? `--title-bg:url('${abs(bg.src)}');` : ''}${tall ? `--title-bg-tall:url('${abs(tall.src)}')` : ''}">
+    <button class="title-puzzle" data-act="puzzle" aria-label="每週殘局" style="position:absolute;left:14px;top:14px;z-index:3;padding:6px 14px;border-radius:999px;background:linear-gradient(#ffe580,#d99a1e);border:2px solid #fff3c4;color:#4a2300;font-weight:800;font-size:15px;line-height:1.2;box-shadow:0 3px 8px rgba(0,0,0,.4);cursor:pointer">每週殘局</button>
     <button class="title-cards" data-act="cards" aria-label="圖鑑"><img class="tc-icon" src="${ASSETS}/maps/remake/challenge/icon.webp" alt=""><span class="tc-label hant" style="margin-top:-14%;padding:2px 10px;border-radius:999px;background:linear-gradient(#ffe580,#d99a1e);border:2px solid #fff3c4;color:#4a2300;font-weight:800;font-size:13px;line-height:1.2;box-shadow:0 2px 4px rgba(0,0,0,.35)">圖鑑</span><span class="tc-label hans" style="margin-top:-14%;padding:2px 10px;border-radius:999px;background:linear-gradient(#ffe580,#d99a1e);border:2px solid #fff3c4;color:#4a2300;font-weight:800;font-size:13px;line-height:1.2;box-shadow:0 2px 4px rgba(0,0,0,.35)">图鉴</span></button>
     <div class="title-buttons">${btn('start', 1, '開始遊戲')}${party}${btn('load', 3, '讀取進度')}${btn('option', 5, '設定')}</div>
     <div class="title-note">${phrases('這款遊戲是大家一起完成的，感謝 GitHub 回報問題的朋友和 B 站留言區的每一條意見。')}</div>
@@ -204,6 +206,7 @@ function title() {
     if (act === 'load') void openLoad();
     if (act === 'option') options();
     if (act === 'cards') void openCollection(app, mapName); // 挑戰模式's picture cards (docs/rules/26 §7.2)
+    if (act === 'puzzle') openWeeklyPuzzle(app, puzzle => startPuzzle(puzzle));
   };
   afterLoadTrouble();
   // 在線更新 (update.ts): this version reached the title (it starts fine); a newer one is offered once per start.
@@ -401,6 +404,12 @@ function newGame() {
     monthly: 1,
     /** 挑戰模式 (docs/rules/30, the user 2026-11-03): 關 / 每月 1 張 / 每月 2 張 / 完成就抽 (settings.monthTasks). */
     monthTasks: 0,
+    /** 24節假日 (settings.holidays): 0 off (classic default), 1 on. */
+    holidays: 0,
+    /** 角色天賦 (settings.traits): 0 off, 1 on. */
+    traits: 0,
+    /** 2v2 同盟 (settings.teams): 0 off, 1 -> [1, 1, 2, 2] when 4 players. */
+    teams: 0,
     kind: 'orig' as MapInfo['kind'] | 'tycoon' | 'challenge',
     slots: [{ character: 9, human: true }, { character: 4, human: false }, { character: 3, human: false }, { character: 0, human: false }],
   };
@@ -482,10 +491,15 @@ function newGame() {
         ${opt(RULE_LABELS.landLimitIndex, 'landLimitIndex', RULE_ITEMS.landLimitIndex)}
         ${ty ? `${opt('電腦難度', 'aiLevel', AI_LEVEL_NAMES)}<p class="ng-date">遊戲時間：直到所有對手破產</p>` : cm ? `${opt('期限', 'yearsIndex', CHALLENGE_YEARS.map(y => (y ? `${y} 年` : '不限')))}
         ${opt('每月任務', 'monthly', ['關', '開'])}
+        ${opt(EXTRA_RULE_LABELS.holidays, 'holidays', EXTRA_RULE_ITEMS.holidays)}
+        ${opt(EXTRA_RULE_LABELS.traits, 'traits', EXTRA_RULE_ITEMS.traits)}
         <p class="ng-date">${CHALLENGE_YEARS[state.yearsIndex] ? '期限到時星最多的人獲勝' : '先拿到 100 顆星的人獲勝'}・欠債不破產</p>` : `${opt(RULE_LABELS.daysLimitIndex, 'daysLimitIndex', RULE_ITEMS.daysLimitIndex)}
         ${opt(RULE_LABELS.victoryIndex, 'victoryIndex', RULE_ITEMS.victoryIndex)}
         ${opt('電腦難度', 'aiLevel', AI_LEVEL_NAMES)}
-        ${state.mapId === FINALE_MAP ? '' : opt('挑戰模式', 'monthTasks', ['關', '每月 1 張', '每月 2 張', '完成就抽'], state.monthTasks ? ' hot on' : ' hot')}`}
+        ${state.mapId === FINALE_MAP ? '' : opt('挑戰模式', 'monthTasks', ['關', '每月 1 張', '每月 2 張', '完成就抽'], state.monthTasks ? ' hot on' : ' hot')}
+        ${opt(EXTRA_RULE_LABELS.holidays, 'holidays', EXTRA_RULE_ITEMS.holidays)}
+        ${opt(EXTRA_RULE_LABELS.traits, 'traits', EXTRA_RULE_ITEMS.traits)}
+        ${state.count === 4 ? opt(EXTRA_RULE_LABELS.teams, 'teams', EXTRA_RULE_ITEMS.teams) : ''}`}
         <p class="ng-date">開局日期 ${format(today())}</p>
       </section>
       <div class="choices ng-actions"><button class="candy ghost" data-back="1">返回</button><button class="candy yes" data-go="1">開始遊戲</button></div></div>`;
@@ -567,6 +581,9 @@ function newGame() {
         ...(cm ? { challenge: true, challengeYears: CHALLENGE_YEARS[state.yearsIndex], challengeMonthly: !!state.monthly } : state.aiLevel ? { aiLevel: state.aiLevel } : {}),
         // 大富翁城 has no 挑戰模式 (the user 2026-11-03).
         ...(!cm && state.monthTasks && state.mapId !== FINALE_MAP ? { monthTasks: state.monthTasks as 1 | 2 | 3 } : {}),
+        ...(state.holidays ? { holidays: true } : {}),
+        ...(state.traits ? { traits: true } : {}),
+        ...(!cm && state.teams && players.length === 4 ? { teams: [1, 1, 2, 2] } : {}),
       });
       return;
     }
@@ -592,6 +609,15 @@ function start(settings: GameSettings, room?: Room) {
   }
   // Every game keeps the statistics ledger (core/stats.ts) for the results screen.
   begin(settings.mapId, board => { const g = new Game(settings, board); attachLedger(g.players); return g; }, false, undefined, room);
+}
+
+/** Launches a curated Weekly Seed Puzzle (`core/puzzle.ts`). */
+function startPuzzle(puzzle: PuzzleDef) {
+  begin(puzzle.mapId, board => {
+    const g = createPuzzleGame(puzzle, board);
+    attachLedger(g.players);
+    return g;
+  }, false, undefined, undefined, puzzle);
 }
 
 /** Maps cleared and characters beaten in this run of games (docs/rules/20 §5; memory only, like the original's tables). */
@@ -670,7 +696,7 @@ function bootScreen(name: string, thumb: string, what: string, sub = ''): Loadin
 }
 
 /** `room`: 派對模式 (party-net.ts) — the other phones' seats wait for their answers, this phone's answers are sent. */
-async function begin(mapId: number, make: (board: import('../core/board').Board) => Game, loaded: boolean, ty?: { world: World; flow: ReturnType<World['run']> }, room?: Room) {
+async function begin(mapId: number, make: (board: import('../core/board').Board) => Game, loaded: boolean, ty?: { world: World; flow: ReturnType<World['run']> }, room?: Room, puzzle?: PuzzleDef) {
   const me = ++session;
   sessionAC?.abort();
   const ac = sessionAC = new AbortController();
@@ -1592,6 +1618,17 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
         bar?.update();
         hud.note(`—— ${format(s.date)} ——`);
         await starNotes();
+        if (puzzle) {
+          const ev = evaluatePuzzle(game, puzzle);
+          if (ev.status !== 'in-progress') {
+            quiet();
+            stopWatch();
+            if (ev.status === 'won') audio.fanfare();
+            await hud.sheetNode('每週殘局結果', puzzleResultNode(puzzle, ev));
+            location.reload();
+            return;
+          }
+        }
         break;
       case 'fx':
         if (fxScreens[s.kind]) {
@@ -1661,6 +1698,7 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
         {
           // The results screen (docs/rules/20 §4), then 「下一局」 (another map, the same settings) or the title.
           await starNotes();
+          if (puzzle) await hud.sheetNode('每週殘局結果', puzzleResultNode(puzzle, evaluatePuzzle(game, puzzle)));
           if (game.challenge && challenge) await hud.sheetNode('挑戰結果', starTable(game, s.winner, faceOf));
           const results = gameResults(game, s.winner);
           run = recordResult(run, results);

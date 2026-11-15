@@ -13,3 +13,16 @@ export const RULE_ITEMS = {
 export const RULE_LABELS: Record<keyof typeof RULE_ITEMS, string> = {
   fundIndex: '總資金', traffic: '行進方式', landLimitIndex: '土地權限', daysLimitIndex: '遊戲時間', victoryIndex: '勝利條件',
 };
+
+/** Optional rule toggles (default off so classic defaults stay unchanged). */
+export const EXTRA_RULE_ITEMS = {
+  holidays: ['關', '開'],
+  traits: ['關', '開'],
+  teams: ['關閉', '2v2'],
+} as const;
+
+export const EXTRA_RULE_LABELS: Record<keyof typeof EXTRA_RULE_ITEMS, string> = {
+  holidays: '24節假日',
+  traits: '角色天賦',
+  teams: '2v2 同盟',
+};
