@@ -18,6 +18,11 @@ import { Objects } from './modules/objects';
 import { Places } from './modules/places';
 import { Stocks } from './modules/stocks';
 import { Tools, type ToolDef } from './modules/tools';
+import {
+  traitBankInterestBonus, traitBuildCost, traitBuyLandCost, traitCardShopRebate,
+  traitDividendBonus, traitEventPointsBonus, traitMonthlyAllowance, traitPointsAmount,
+  traitStartingPoints, traitStepBonus, traitTaxAmount, traitTollIncome, traitTollPay,
+} from './modules/traits';
 import { runWheel, WHEEL_AUTO_STOP, WheelKind } from './modules/wheel';
 import { SmartAi } from './smart-ai';
 import { Challenge, CHALLENGE_WIN, taskPool } from './challenge';
@@ -349,6 +354,12 @@ export class Game {
         ...(s.nick ? { nick: s.nick } : {}),
       };
     });
+    if (!link && settings.traits) {
+      for (const p of this.players) {
+        const bonus = traitStartingPoints(this, p);
+        if (bonus > 0) p.points = (p.points + bonus) & 0xffff;
+      }
+    }
     this.stocks = new Stocks(this);
     this.cards = new Cards(this);
     this.tools = new Tools(this);
@@ -560,6 +571,9 @@ export class Game {
    * flags & 4: take from the bank account first; flags & 1: the receiver gets cash instead of a deposit.
    */
   *transfer(from: number, to: number, amount: number, flags: number, reason: string, quiet = false): Flow<number> {
+    if (this.settings.traits && from >= 0 && from < this.players.length && to === -1 && reason.endsWith('稅')) {
+      amount = traitTaxAmount(this, this.players[from], amount);
+    }
     if (from >= 100) {
       const c = this.board.companies[from - 101];
       c.fundA -= amount; c.fundB -= amount;
@@ -863,11 +877,32 @@ export class Game {
     this.rng.reseed(daySeed(this.rollSeed(), this.daysElapsed));
     yield* this.stocks.daily();
     if (dayOf(this.date) === 15) {
-      yield* this.stocks.dividends();
+      if (this.settings.traits) {
+        const before = this.players.map(p => p.cash + p.bank);
+        yield* this.stocks.dividends();
+        for (const p of this.living()) {
+          const bonus = traitDividendBonus(this, p, (p.cash + p.bank) - before[p.id]);
+          if (bonus > 0) this.gain(p, bonus, 1);
+        }
+      } else {
+        yield* this.stocks.dividends();
+      }
       yield* this.places.lotteryDraw();
     }
     if (newMonth) {
+      const traitInterestBonuses = this.settings.traits && !this.rules?.chipsOnly
+        ? this.living().map(p => ({ id: p.id, bonus: traitBankInterestBonus(this, p) }))
+        : [];
       yield* this.finance.monthlySettlement();
+      if (this.settings.traits) {
+        for (const { id, bonus } of traitInterestBonuses) {
+          if (bonus > 0) this.players[id].bank += bonus;
+        }
+        for (const p of this.living()) {
+          const allowance = traitMonthlyAllowance(this, p);
+          if (allowance > 0) this.gain(p, allowance, 1);
+        }
+      }
       yield* this.objects.monthly();
       yield* this.blackMarket.monthly();
       this.monthsElapsed += 1;
@@ -1183,6 +1218,7 @@ export class Game {
       const values = forced ? [forced] : own ?? Array.from({ length: p.dice }, () => this.rng.rand() % 6 + 1);
       yield { t: 'dice', p: p.id, values };
       steps = values.reduce((a, b) => a + b, 0);
+      if (this.settings.traits) steps += traitStepBonus(this, p);
     }
     this.diceTotal = steps;
     while (steps > 0) {
@@ -1244,14 +1280,27 @@ export class Game {
         { const f = facilityOf(this.board, n);
           if (f && f.owner === p.id + 1 && f.type === 4 && f.level >= 1 && !(f.tmpState & 0xf) && !p.sleepwalk) yield* this.tools.labStop(p, f.id); }
         break;
-      case 2: yield* this.events.news(p); break;
-      case 3: yield* this.events.fate(p); break;
+      case 2:
+        yield* this.events.news(p);
+        if (this.settings.traits && p.whoPlays && !this.over) {
+          const ep = traitEventPointsBonus(this, p);
+          if (ep > 0) { p.points = (p.points + ep) & 0xffff; yield { t: 'points', p: p.id, amount: ep }; }
+        }
+        break;
+      case 3:
+        yield* this.events.fate(p);
+        if (this.settings.traits && p.whoPlays && !this.over) {
+          const ep = traitEventPointsBonus(this, p);
+          if (ep > 0) { p.points = (p.points + ep) & 0xffff; yield { t: 'points', p: p.id, amount: ep }; }
+        }
+        break;
       case 4: yield* this.places.prisonStop(p); break;
       case 5: yield* this.places.hospitalStop(p); break;
       case 6: case 7: case 8: yield* this.places.miniGame(p, n.event); break;
       case 9: yield* this.places.lotteryStop(p); break;
       case 10: case 11: case 12: {
-        const amount = n.event === 10 ? 50 : n.event === 11 ? 30 : 10;
+        const baseAmount = n.event === 10 ? 50 : n.event === 11 ? 30 : 10;
+        const amount = this.settings.traits ? traitPointsAmount(this, p, baseAmount) : baseAmount;
         p.points = (p.points + amount) & 0xffff;
         yield { t: 'points', p: p.id, amount };
         break;
@@ -1264,7 +1313,18 @@ export class Game {
       case 14:
         if (this.rules?.chipsOnly) { if (this.isHuman(p)) yield* this.say(p.id, '大富翁城只用籌碼，銀行不辦存款和貸款'); break; }
         yield* this.atm(p); if (!this.over && p.whoPlays) yield* this.bankCounter(p); break;
-      case 15: yield* this.tools.shop(p); break;
+      case 15:
+        if (this.settings.traits) {
+          const beforeCards = new Map<number, number>();
+          for (const id of p.cards) beforeCards.set(id, (beforeCards.get(id) ?? 0) + 1);
+          const beforePoints = p.points;
+          yield* this.tools.shop(p);
+          const rebate = traitCardShopRebate(this, p, beforeCards, beforePoints);
+          if (rebate > 0) { p.points = (p.points + rebate) & 0xffff; yield { t: 'points', p: p.id, amount: rebate }; }
+        } else {
+          yield* this.tools.shop(p);
+        }
+        break;
       case 16: yield* this.places.magicHouse(p); break;
       case 17: case 18: if (this.world) yield* this.world.hooks.travelSquare(this, p, 0); break;
     }
@@ -1284,7 +1344,8 @@ export class Game {
     const me = p.id + 1, god = this.objects.godType(p);
     if (land.owner === 0) {
       if (p.sleepwalk || god === 12) return;
-      const price = (land.price + land.level * land.perLevel) * this.priceIndex;
+      const basePrice = (land.price + land.level * land.perLevel) * this.priceIndex;
+      const price = this.settings.traits ? traitBuyLandCost(this, p, basePrice) : basePrice;
       if (price > p.cash) { if (this.isHuman(p)) yield* this.say(p.id, '您的現金不足！'); return; }
       const yes = this.isHuman(p)
         ? (yield ask({ t: 'yesno', p: p.id, kind: 'buy-land', text: `${land.name}\n\n費用:${price}元\n\n是否買下此地？`, price })) as boolean
@@ -1300,7 +1361,8 @@ export class Game {
     }
     if (land.owner === me) {
       if (land.level >= 5 || land.chain || p.sleepwalk) return;
-      const cost = land.perLevel * this.priceIndex;
+      const baseCost = land.perLevel * this.priceIndex;
+      const cost = this.settings.traits ? traitBuildCost(this, p, baseCost) : baseCost;
       if (cost > p.cash) { if (this.isHuman(p)) yield* this.say(p.id, '您的現金不足！'); return; }
       const yes = this.isHuman(p)
         ? (yield ask({ t: 'yesno', p: p.id, kind: 'upgrade-land', text: `${land.name}\n\n升級費用:${cost}元\n\n是否升級？`, price: cost })) as boolean
@@ -1334,6 +1396,7 @@ export class Game {
     if (land.tmpState) base *= 2;
     if (this.rules?.tollFactor) base = Math.round(base * this.rules.tollFactor(this, land)); // 歌舞伎町 (docs/rules/21 §6, §7.5)
     base = this.debtToll(owner, base);
+    if (this.settings.traits) base = traitTollIncome(this, owner, base);
     const total = base + allyPart;
     // The owner's (and ally's) lots of this street, or all their chain stores, flash first when there is more
     // than one, to show the toll is the whole street's (rich4_player_core_actions.asm:550-661, fcn_00451985).
@@ -1360,6 +1423,7 @@ export class Game {
    */
   *collect(p: Player, owner: Player, total: number, fee: string, cardsAllowed: boolean): Flow<{ payer: number; amount: number } | null> {
     let amount = this.godModify(p, total);
+    if (this.settings.traits) amount = traitTollPay(this, p, amount);
     if (amount !== total) yield* this.say(p.id, this.rules?.godFeeText?.(this, p, fee, total, amount) ?? (amount === 0 ? `${fee}免付！` : `${fee}改為${amount}元`));
     if (amount === 0) return null;
     this.addHostility(p.id, owner.id, Math.trunc(amount / 100));
@@ -1433,7 +1497,8 @@ export class Game {
     const me = p.id + 1, god = this.objects.godType(p);
     if (f.owner === 0) {
       if (p.sleepwalk || god === 12) return;
-      const price = f.price * this.priceIndex;
+      const basePrice = f.price * this.priceIndex;
+      const price = this.settings.traits ? traitBuyLandCost(this, p, basePrice) : basePrice;
       if (price > p.cash) { if (this.isHuman(p)) yield* this.say(p.id, '您的現金不足！'); return; }
       const yes = this.isHuman(p)
         ? (yield ask({ t: 'yesno', p: p.id, kind: 'buy-facility', text: `${f.name}\n\n費用:${price}元\n\n是否買下此地？`, price })) as boolean
@@ -1449,7 +1514,8 @@ export class Game {
     if (f.owner === me) {
       if (p.sleepwalk) return;
       if (f.level === 0) {
-        const cost = f.price * this.priceIndex;
+        const baseCost = f.price * this.priceIndex;
+        const cost = this.settings.traits ? traitBuildCost(this, p, baseCost) : baseCost;
         if (cost > p.cash) { if (this.isHuman(p)) yield* this.say(p.id, '您的現金不足！'); return; }
         if (this.smartAi(p) && !this.smart.wantsToBuild(p, cost)) return;
         const resort = this.world ? this.world.hooks.resort(this) : 1;
@@ -1467,7 +1533,8 @@ export class Game {
         return;
       }
       if (f.level >= FACILITY_MAX_LEVEL[f.type]) return;
-      const cost = f.fees[0] * this.priceIndex;
+      const baseCost = f.fees[0] * this.priceIndex;
+      const cost = this.settings.traits ? traitBuildCost(this, p, baseCost) : baseCost;
       if (cost > p.cash) { if (this.isHuman(p)) yield* this.say(p.id, '您的現金不足！'); return; }
       const yes = this.isHuman(p)
         ? (yield ask({ t: 'yesno', p: p.id, kind: 'upgrade-facility', text: `${f.name}\n\n升級費用:${cost}元\n\n是否升級？`, price: cost })) as boolean
@@ -1499,6 +1566,7 @@ export class Game {
       amount = vehicle && vehicle < 3 ? this.debtToll(owner, 500 * (1 << (vehicle - 1)) * this.diceTotal * this.priceIndex) : 0;
       if (amount) yield* this.say(undefined, `董事長${this.name(owner.id)} 請付${amount}元加油費`);
     }
+    if (this.settings.traits && amount > 0) amount = traitTollIncome(this, owner, amount);
     if (f.type === 1 && REMAKE_HOTEL.on) {
       // The remake (02 §4.3): the stay takes the passive cards; framed, the other player stays.
       const stayer = amount ? yield* this.hotelPay(p, owner, f, amount, fee) : p;
@@ -1520,6 +1588,7 @@ export class Game {
    */
   *hotelPay(p: Player, owner: Player, f: Facility, total: number, fee: string): Flow<Player | null> {
     let amount = this.godModify(p, total), stayer: Player | null = p;
+    if (this.settings.traits) amount = traitTollPay(this, p, amount);
     if (amount !== total) yield* this.say(p.id, this.rules?.godFeeText?.(this, p, fee, total, amount) ?? (amount === 0 ? `${fee}免付！` : `${fee}改為${amount}元`));
     if (amount <= 0) return stayer;
     this.addHostility(p.id, owner.id, Math.trunc(amount / 100));

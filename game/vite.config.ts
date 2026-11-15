@@ -17,5 +17,17 @@ export default defineConfig({
     // style sheets keep Vite's own default targets.
     target: ['chrome87', 'edge88', 'firefox104', 'safari16'],
     cssTarget: ['chrome107', 'edge107', 'firefox104', 'safari16'],
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('/@capacitor/')) return 'vendor-capacitor';
+          if (id.includes('/fflate/')) return 'vendor-fflate';
+          if (id.includes('/peerjs/') || id.includes('/webrtc-adapter/') || id.includes('/sdp/') || id.includes('/js-binary-schema/') || id.includes('/eventemitter3/') || id.includes('/reliable-channel/')) return 'vendor-peer';
+          return undefined;
+        },
+      },
+    },
   },
 });
