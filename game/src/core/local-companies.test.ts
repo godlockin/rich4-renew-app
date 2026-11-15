@@ -25,7 +25,7 @@ function settings(mapId: number, seed: number): GameSettings {
 }
 
 describe.skipIf(!have)('local companies of the remake cities', () => {
-  const boards = Object.fromEntries(Object.keys(CITIES).map(k => [k, parseBoard(raw(k))])) as Record<keyof typeof CITIES, Board>;
+  const boards = (have ? Object.fromEntries(Object.keys(CITIES).map(k => [k, parseBoard(raw(k))])) : {}) as Record<keyof typeof CITIES, Board>;
 
   it('each city has its own 12 stock names, none shared with another city', () => {
     const seen = new Map<string, string>();

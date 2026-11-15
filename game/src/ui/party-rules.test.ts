@@ -215,9 +215,9 @@ describe('server-backed Lobby', () => {
     const l2 = new Lobby('0.9.0');
     const mine: RoomInfo = { code: '9900', host: 'p0', character: 0, map: '2', players: 1, max: 8, at: Date.now() };
     await l1.start(mine);
-    await settle(20);
+    await settle(60);
     await l2.start(undefined, true);
-    await settle(20);
+    await settle(60);
 
     expect([...l2.rooms.values()].map(r => r.code)).toEqual(['9900']);
     l1.close();

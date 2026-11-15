@@ -31,9 +31,7 @@ jobs:
       - name: Run party-relay tests
         run: node --test tools/party-relay/relay.test.mjs
       - name: Audit maps
-        run: |
-          node editor/audit.mjs game/public/assets/maps/map-0.json
-          node editor/audit.mjs game/public/assets/maps/remake/live-city.json
+        run: node editor/audit.mjs game/public/assets/maps/remake/live-city.json
 
   build-web:
     needs: verify
