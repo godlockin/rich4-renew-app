@@ -23,6 +23,10 @@ jobs:
         run: npx tsc --noEmit
       - name: Run game unit tests
         working-directory: game
-        run: npm test -- --run
+        run: npx vitest run --maxWorkers=2
       - name: Run party-relay tests
         run: node --test tools/party-relay/relay.test.mjs
+      - name: Audit maps
+        run: |
+          node editor/audit.mjs game/public/assets/maps/map-0.json
+          node editor/audit.mjs game/public/assets/maps/remake/live-city.json

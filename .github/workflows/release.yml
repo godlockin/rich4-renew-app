@@ -27,9 +27,13 @@ jobs:
         run: npx tsc --noEmit
       - name: Run game unit tests
         working-directory: game
-        run: npx vitest run
+        run: npx vitest run --maxWorkers=2
       - name: Run party-relay tests
         run: node --test tools/party-relay/relay.test.mjs
+      - name: Audit maps
+        run: |
+          node editor/audit.mjs game/public/assets/maps/map-0.json
+          node editor/audit.mjs game/public/assets/maps/remake/live-city.json
 
   build-web:
     needs: verify
@@ -56,7 +60,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download assets -p 'rich4-assets.tar*'
+          gh release download assets -p 'rich4-assets.tar*' || gh release download assets -R iam567/rich4-renew-app -p 'rich4-assets.tar*'
           shasum -a 256 -c rich4-assets.tar.sha256
           mkdir -p public
           tar -xf rich4-assets.tar -C public
