@@ -12,8 +12,9 @@
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
     label { font-size: 11px; color: #9fb0c7; display: block; margin-bottom: 2px; }
-    input, select, button { font-size: 12px; border-radius: 6px; border: 1px solid #334155; background: #0f151d; color: #e8eef5; padding: 5px 7px; }
-    input, select { width: 100%; }
+    input, select, button, textarea { font-size: 12px; border-radius: 6px; border: 1px solid #334155; background: #0f151d; color: #e8eef5; padding: 5px 7px; }
+    input, select, textarea { width: 100%; }
+    textarea { font-family: ui-monospace, monospace; resize: vertical; min-height: 54px; }
     input[type="checkbox"] { width: auto; }
     input[type="range"] { padding: 0; }
     button { cursor: pointer; background: #2563eb; border-color: #3b82f6; font-weight: 600; white-space: nowrap; }
@@ -78,6 +79,25 @@
     <div class="card" id="stats">節點：0 | 地產：0 | 設施：0 | 企業：0</div>
     <div class="card" id="inspector">點擊畫布新增節點，或切換模式選取/拖曳節點。</div>
     <div class="card" id="auditBox">審計狀態：尚無節點</div>
+
+    <div class="card">
+      <h2>分享碼匯出 / 匯入 (RICH4MAP1:)</h2>
+      <div class="row" style="margin-bottom:6px">
+        <button id="btnShareExport" style="flex:1">產生並複製分享碼</button>
+        <button id="btnShareImport" class="ghost" style="flex:1">匯入分享碼</button>
+      </div>
+      <textarea id="shareCodeIn" placeholder="在此貼上 RICH4MAP1:... 分享碼"></textarea>
+      <div id="shareStatus" style="margin-top:4px;font-size:11px;color:#9fb0c7"></div>
+    </div>
+
+    <div class="card">
+      <h2>自訂事件包 (customEvents JSON)</h2>
+      <textarea id="customEventsIn" placeholder='[{"id":1,"title":"夜市發財","kind":"cash","amount":1500,"message":"大賺1500元"}]'></textarea>
+      <div class="row" style="margin-top:6px">
+        <button id="btnCheckEvents" class="ghost" style="flex:1">檢查並套用 customEvents</button>
+      </div>
+      <div id="customEventsStatus" style="margin-top:4px;font-size:11px;color:#9fb0c7">尚未設定自訂事件</div>
+    </div>
   </aside>
 
   <main>
@@ -134,6 +154,7 @@
       });
       const out = { name: raw.name || `Map ${raw.map_id}`, mapId: raw.map_id ?? 0, size: raw.width ?? 2304, nodes, lands, facilities, companies, landscapes };
       if (raw.stock_names?.length === 12) out.stockNames = [...raw.stock_names];
+      if (Array.isArray(raw.customEvents)) out.customEvents = raw.customEvents;
       return out;
     }
 
@@ -476,6 +497,7 @@
       if (imgUrl) { const im = new Image(); im.onload = draw; im.src = imgUrl; bgImg = im; }
       else bgImg = null;
       syncMetaInputs();
+      syncCustomEventsInput();
       const s = board.size || 2304;
       cam = { x: s / 2, y: s / 2, zoom: Math.min(cv.width, cv.height) / (s * 1.1) };
       renderInspector(); draw();
@@ -524,7 +546,120 @@
       loadBoardObject(j, image);
     };
 
+    const SHARE_PREFIX = 'RICH4MAP1:';
+    const MAX_SHARE_BYTES = 512 * 1024;
+    const EVENT_KINDS = new Set(['cash', 'points', 'card', 'hospital', 'prison']);
+
+    function checkCustomEventsList(arr) {
+      if (!Array.isArray(arr)) return ['customEvents 必須為 JSON 陣列'];
+      const errs = [], seen = new Set();
+      arr.forEach((ev, i) => {
+        if (!ev || typeof ev !== 'object' || Array.isArray(ev)) { errs.push(`第 ${i + 1} 筆必須為物件`); return; }
+        if (!Number.isInteger(ev.id) || ev.id < 0) errs.push(`第 ${i + 1} 筆 id 須為非負整數`);
+        else if (seen.has(ev.id)) errs.push(`id ${ev.id} 重複`);
+        else seen.add(ev.id);
+        if (typeof ev.title !== 'string' || !ev.title.trim()) errs.push(`第 ${i + 1} 筆 title 不可為空`);
+        if (!EVENT_KINDS.has(ev.kind)) errs.push(`第 ${i + 1} 筆 kind 須為 cash/points/card/hospital/prison`);
+        if (typeof ev.amount !== 'number' || !Number.isFinite(ev.amount)) errs.push(`第 ${i + 1} 筆 amount 須為有限數字`);
+        if (typeof ev.message !== 'string') errs.push(`第 ${i + 1} 筆 message 須為字串`);
+      });
+      return errs;
+    }
+
+    function syncCustomEventsInput() {
+      const ta = document.getElementById('customEventsIn');
+      const st = document.getElementById('customEventsStatus');
+      if (Array.isArray(board.customEvents) && board.customEvents.length) {
+        ta.value = JSON.stringify(board.customEvents, null, 2);
+        const errs = checkCustomEventsList(board.customEvents);
+        st.innerHTML = errs.length ? `<span class="err">${errs[0]}</span>` : `<span class="ok">已載入 ${board.customEvents.length} 筆自訂事件</span>`;
+      } else {
+        ta.value = '';
+        st.textContent = '尚未設定自訂事件';
+      }
+    }
+
+    document.getElementById('btnCheckEvents').onclick = () => {
+      const rawText = document.getElementById('customEventsIn').value.trim();
+      const st = document.getElementById('customEventsStatus');
+      if (!rawText) {
+        pushHistory();
+        delete board.customEvents;
+        st.innerHTML = '<span class="ok">已清除自訂事件</span>';
+        return;
+      }
+      let parsed;
+      try { parsed = JSON.parse(rawText); }
+      catch (err) { st.innerHTML = `<span class="err">JSON 語法錯誤：${err.message}</span>`; return; }
+      const errs = checkCustomEventsList(parsed);
+      if (errs.length) { st.innerHTML = `<span class="err">${errs.join('；')}</span>`; return; }
+      pushHistory();
+      board.customEvents = parsed;
+      st.innerHTML = `<span class="ok">檢查通過並已套用 ${parsed.length} 筆自訂事件</span>`;
+    };
+
+    async function zlibBytes(bytes, compress) {
+      const StreamCtor = compress ? window.CompressionStream : window.DecompressionStream;
+      if (!StreamCtor) throw new Error('此瀏覽器不支援 CompressionStream / DecompressionStream');
+      const ds = new Blob([bytes]).stream().pipeThrough(new StreamCtor('deflate'));
+      const buf = await new Response(ds).arrayBuffer();
+      return new Uint8Array(buf);
+    }
+
+    function toB64Url(bytes) {
+      let s = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function fromB64Url(str) {
+      if (!/^[A-Za-z0-9\-_]+$/.test(str)) throw new Error('分享碼含無效字元');
+      const pad = (4 - (str.length % 4)) % 4;
+      const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad));
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+
+    document.getElementById('btnShareExport').onclick = async () => {
+      const st = document.getElementById('shareStatus');
+      try {
+        const rawBytes = new TextEncoder().encode(JSON.stringify(board));
+        if (rawBytes.byteLength > MAX_SHARE_BYTES) throw new Error(`地圖大小超過 ${MAX_SHARE_BYTES} bytes 上限`);
+        const compressed = await zlibBytes(rawBytes, true);
+        const code = SHARE_PREFIX + toB64Url(compressed);
+        document.getElementById('shareCodeIn').value = code;
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code).catch(() => {});
+        st.innerHTML = `<span class="ok">已產生分享碼（${code.length} 字元）</span>`;
+      } catch (err) {
+        st.innerHTML = `<span class="err">匯出失敗：${err.message}</span>`;
+      }
+    };
+
+    document.getElementById('btnShareImport').onclick = async () => {
+      const st = document.getElementById('shareStatus');
+      try {
+        const code = document.getElementById('shareCodeIn').value.trim();
+        if (!code.startsWith(SHARE_PREFIX)) throw new Error(`分享碼須以 ${SHARE_PREFIX} 開頭`);
+        const payload = code.slice(SHARE_PREFIX.length);
+        if (!payload || payload.length > MAX_SHARE_BYTES * 2) throw new Error('分享碼內容無效或過大');
+        const decoded = await zlibBytes(fromB64Url(payload), false);
+        if (decoded.byteLength > MAX_SHARE_BYTES) throw new Error(`解壓後超過 ${MAX_SHARE_BYTES} bytes 上限`);
+        const obj = JSON.parse(new TextDecoder().decode(decoded));
+        if (!obj || !Array.isArray(obj.nodes)) throw new Error('分享碼內含無效地圖結構');
+        if (obj.customEvents !== undefined) {
+          const errs = checkCustomEventsList(obj.customEvents);
+          if (errs.length) throw new Error(errs[0]);
+        }
+        loadBoardObject(obj, null);
+        st.innerHTML = `<span class="ok">已匯入地圖「${obj.name || ''}」（${obj.nodes.length} 節點）</span>`;
+      } catch (err) {
+        st.innerHTML = `<span class="err">匯入失敗：${err.message}</span>`;
+      }
+    };
+
     syncMetaInputs();
+    syncCustomEventsInput();
     resize();
     document.getElementById('btnFit').click();
   </script>
