@@ -35,7 +35,7 @@ const fit = (name: string, width: number, size: number) => { const n = [...name]
 export class PlayerPanel {
   readonly el: HTMLElement;
   /** Each player remembers their own tab (0x48be24). */
-  private tabs: number[] = [0, 0, 0, 0];
+  private tabs: number[] = new Array(12).fill(0);
   private shown = -1;
   /** 視窗組 2: the 200×80 panel with only cash and deposit (09 §4.4). */
   compact = false;

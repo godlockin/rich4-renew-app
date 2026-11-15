@@ -167,6 +167,8 @@ function warmThumbs(list: MapInfo[]): Promise<unknown> {
 }
 
 function title() {
+  sessionAC?.abort();
+  sessionAC = null;
   const b = bank!;
   const bg = b.art('Data', 1, 0);
   const tall = b.art('Data', 9001); // remake: the title redrawn for portrait screens (style.css .title)
@@ -245,11 +247,13 @@ function afterLoadTrouble() {
  * from the room list (party-net Lobby, which this phone may come to hold). Only while the title is shown and online.
  */
 let titleLobby: Lobby | null = null;
-let titleCount = 0;
+let watchAC: AbortController | null = null;
 function watchParty(el: HTMLElement) {
   stopWatchingParty();
   inParty(null); // back at the title: no longer in 派對模式
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const ac = watchAC = new AbortController();
+  const { signal } = ac;
   const lobby = new Lobby();
   titleLobby = lobby;
   // 派對模式's head count from the relay (party-presence.ts, the user 2026-11-03), read every 20 s here.
@@ -260,12 +264,14 @@ function watchParty(el: HTMLElement) {
     el.innerHTML = `${online ? `<b>派對模式 ${online} 人在線</b>` : ''}${stats.privateRooms ? `<b>私享房間 ${stats.privateRooms}</b>` : ''}${stats.waiting ? `<b>等待夥伴 ${stats.waiting} 人</b>` : ''}`;
   };
   lobby.onStats = s => { stats = s; draw(); };
-  const count = async () => { const n = await fetchHeadCount(); if (titleLobby !== lobby) return; online = n?.online ?? 0; draw(); };
+  const count = async () => { const n = await fetchHeadCount(); if (titleLobby !== lobby || signal.aborted) return; online = n?.online ?? 0; draw(); };
   void count();
-  titleCount = window.setInterval(() => void count(), 20_000);
+  const timer = window.setInterval(() => void count(), 20_000);
+  signal.addEventListener('abort', () => { lobby.close(); clearInterval(timer); });
+  window.addEventListener('pagehide', stopWatchingParty, { signal });
   void lobby.start();
 }
-function stopWatchingParty() { titleLobby?.close(); titleLobby = null; clearInterval(titleCount); titleCount = 0; }
+function stopWatchingParty() { watchAC?.abort(); watchAC = null; titleLobby = null; }
 
 /** 電腦難度's names (Game.aiLevel 0–3; 地獄: the computers play their best and all against the humans, core/smart-ai.ts). */
 const AI_LEVEL_NAMES = ['簡單', '中等', '困難', '地獄'];
@@ -572,6 +578,7 @@ let bank: SpriteBank | null = null;
 
 /** Bumped whenever a game starts or is loaded; a controller loop from an older session stops. */
 let session = 0;
+let sessionAC: AbortController | null = null;
 let currentView: BoardView | null = null;
 let currentWeather: WeatherFx | null = null;
 
@@ -664,6 +671,9 @@ function bootScreen(name: string, thumb: string, what: string, sub = ''): Loadin
 /** `room`: 派對模式 (party-net.ts) — the other phones' seats wait for their answers, this phone's answers are sent. */
 async function begin(mapId: number, make: (board: import('../core/board').Board) => Game, loaded: boolean, ty?: { world: World; flow: ReturnType<World['run']> }, room?: Room) {
   const me = ++session;
+  sessionAC?.abort();
+  const ac = sessionAC = new AbortController();
+  const { signal } = ac;
   currentView?.destroy();
   currentView = null;
   currentWeather?.destroy();
@@ -743,7 +753,9 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
   mapBox.append(minimap.el);
   // The small map shows in 日曆 mode too once the screen turns portrait (and grows / shrinks with the layout):
   // drawn again whenever its box changes size, not only on the HUD's refresh.
-  new ResizeObserver(() => { if (mapBox.clientWidth) minimap.update(); }).observe(mapBox);
+  const ro = new ResizeObserver(() => { if (mapBox.clientWidth) minimap.update(); });
+  ro.observe(mapBox);
+  signal.addEventListener('abort', () => ro.disconnect());
   // Another style chosen in 系統.
   const applyGround = async () => {
     const want = groundStyles.includes(groundStyle()) ? groundStyle() : '';
@@ -788,6 +800,7 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
   // cover it (issue #11: a message at the bottom slid the map up and back for every box), and a box closing with the
   // next one opening right after leaves it where it is instead of back and forth.
   let focusBack: ReturnType<typeof setTimeout> | undefined;
+  signal.addEventListener('abort', () => clearTimeout(focusBack));
   hud.onModal = top => {
     clearTimeout(focusBack);
     if (top === null) { focusBack = setTimeout(() => { view.focusY = 0.5; }, 350); return; }
@@ -825,10 +838,11 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
   let keptDice: { key: string; dice: number } | null = null;
   // Going to the background at the turn menu stores that turn again (the app may be closed or crash out there).
   const saveOnHide = () => {
-    if (me !== session) { document.removeEventListener('visibilitychange', saveOnHide); return; }
-    if (document.visibilityState === 'hidden' && turnSave && lastAuto) writeAuto(ty ? TYCOON_AUTO_SLOT : AUTO_SLOT, turnSave, `${me}:${lastAuto}`).catch(() => {});
+    if (me !== session) return;
+    if (turnSave && lastAuto) writeAuto(ty ? TYCOON_AUTO_SLOT : AUTO_SLOT, turnSave, `${me}:${lastAuto}`).catch(() => {});
   };
-  document.addEventListener('visibilitychange', saveOnHide);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveOnHide(); }, { signal });
+  window.addEventListener('pagehide', saveOnHide, { signal });
   /** Answers the open turn (GO or a toolbar action); null while no human decides to roll. */
   let answerTurn: ((a: Answer) => void) | null = null;
   const thumb = (id: number) => maps.find(m => m.id === id)?.thumbnail ?? '';
@@ -1066,7 +1080,8 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
   wd.start();
   (window as unknown as { __rich4: Record<string, unknown> }).__rich4.watch = () => wd.report();
   (window as unknown as { __rich4Mem: unknown }).__rich4Mem = () => memReport(bank, view); // memory by kind (ui/mem-report.ts)
-  const stopWatch = () => { wd.stop(); };
+  const stopWatch = () => { wd.stop(); if (sessionAC === ac) ac.abort(); };
+  signal.addEventListener('abort', () => wd.stop());
   // The last line of defence (issue #9: 「觸發事件時經常卡死…音效重複播放，界面可以點擊，但事件無法結算」): every effect,
   // screen and camera move an event shows is awaited through `shown`, which gives up on it after a generous time the
   // page was in front (a slow phone decoding pictures still has plenty; 3× while a human is the one the screen waits
@@ -1251,6 +1266,7 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
     // Each human player's ping over their head on the map (party-hud.ts PingTags), with the 延遲 panel.
     new PingTags(stage, room, view, () => partyBar.netShown);
     shell.classList.add('party');
+    signal.addEventListener('abort', () => { clearInterval(tick); partyBar.destroy(); });
   }
   /** The rest of this phone's turn clock (null when it does not run for this question). */
   const expires = (p: number): Promise<void> | null => {

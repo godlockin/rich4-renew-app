@@ -12,7 +12,6 @@
  * screen closes (fcn_004549cf / fcn_00454bcc), and holiday music that holds for its days.
  */
 import { watch } from './watchdog';
-import { isAndroid, memTier } from './mem-tier';
 import { ASSETS } from './assets';
 import { CARD_LINES, EVENT_LINES, TOOL_LINES } from './lines';
 import { CARD_VOICE, EVENT_VOICE, TOOL_VOICE, VOICE_TEXT } from './voices';
@@ -119,7 +118,9 @@ class AudioEngine {
   private effects = new Map<number, Playing>();
   private loops = new Set<number>();
   private voiceNow: { id: number; playing: Playing | null; end: () => void } | null = null;
-  private musicNow: { state: MusicState; playing: Playing | null; started: number; offset: number } = { state: null, playing: null, started: 0, offset: 0 };
+  private musicEl: HTMLAudioElement | null = null;
+  private musicToken = 0;
+  private musicNow: { state: MusicState; playing: boolean; offset: number } = { state: null, playing: false, offset: 0 };
   /** Background tracks pushed by screen themes: index and position (0x48cb70 / 0x48cb50). */
   private stack: { index: number; at: number }[] = [];
   /** Holiday music days: high nibble the total, low nibble the days left (0x46cb06). */
@@ -138,9 +139,19 @@ class AudioEngine {
       const unlock = () => this.unlock();
       for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) window.addEventListener(ev, unlock, { capture: true, passive: true });
       document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          if (this.musicNow.state && this.musicEl && !this.musicEl.paused) {
+            this.musicNow.offset = this.position();
+            try { this.musicEl.pause(); } catch { /* ignore */ }
+          }
+          if (!this.ctx) return;
+          this.hiddenAt = Date.now(); this.selfSuspend = true; void this.ctx.suspend().catch(() => {}); return;
+        }
         if (!this.ctx) return;
-        if (document.hidden) { this.hiddenAt = Date.now(); this.selfSuspend = true; void this.ctx.suspend().catch(() => {}); return; }
         this.wake();
+        if (this.musicNow.state && this.musicEl && this.settings.music > 0 && !this.settings.mute && this.musicEl.paused) {
+          void this.musicEl.play().catch(() => {});
+        }
         // iOS WKWebView: after the app was in the background (a message, a call, the home screen) the context often
         // reports 'running' but plays nothing, and resume() can't fix it. So coming back from the background always
         // builds a fresh context (the app's web view needs no touch to start audio — mediaTypesRequiringUserAction
@@ -238,7 +249,7 @@ class AudioEngine {
     const old = this.ctx;
     if (!old) return;
     const m = this.musicNow, at = m.state ? this.position() : 0;
-    m.playing = null;
+    m.playing = false;
     this.effects.clear();
     this.ctx = null; this.out = null; this.master = null;
     this.interrupted = false; this.selfSuspend = false; this.stopRetry();
@@ -277,7 +288,7 @@ class AudioEngine {
       s.connect(ctx.destination);
       s.start();
       const m = this.musicNow;
-      if (m.state && !m.playing) this.startMusic(m.state, m.offset);
+      if (m.state && (!m.playing || this.musicEl?.paused)) this.startMusic(m.state, m.offset);
     }
   }
   private unlocked = false;
@@ -329,29 +340,6 @@ class AudioEngine {
 
   private drop(key: string) { this.buffers.delete(key); this.decoded.delete(key); }
 
-  /**
-   * Decoded music is big (a 3-minute track is ~70 MB of samples at 48 kHz: all 25 tracks would be ~760 MB, and a long
-   * game used to keep every one it had played; issue #13, Android closing the app late in a game). On Android, beyond
-   * the device's budget (ui/mem-tier.ts `musicBytes`) the least recently played go, never the one playing (`now`) nor the
-   * background tracks a screen will resume; they are decoded again when next played.
-   */
-  private trimMusic(now: string) {
-    // Android only (iOS and the desktop keep every decoded track, as before: the owner 2026-10-26).
-    const budget = isAndroid() ? memTier().musicBytes : Infinity;
-    if (budget === Infinity) return;
-    const need = new Set([`music/${now}`, ...this.stack.map(s => `music/${musicName(this.mset, { kind: 'bgm', index: s.index })}`)]);
-    const size = (b: AudioBuffer) => b.length * b.numberOfChannels * 4;
-    let used = 0;
-    for (const [k, b] of this.decoded) if (k.startsWith('music/')) used += size(b);
-    for (const k of [...this.buffers.keys()]) {
-      if (used <= budget) break;
-      const b = this.decoded.get(k);
-      if (!k.startsWith('music/') || need.has(k) || !b) continue;
-      used -= size(b);
-      this.drop(k);
-    }
-  }
-
   /** Decoded audio held: count and bytes, music apart (for the memory report, ui/mem-report.ts). */
   memStats(): { buffers: number; bytes: number; music: number; musicBytes: number } {
     let bytes = 0, music = 0, musicBytes = 0;
@@ -372,8 +360,13 @@ class AudioEngine {
   // ------------------------------------------------------------ volumes
 
   private applyVolumes() {
+    const s = this.settings;
+    if (this.musicEl) {
+      this.musicEl.muted = s.mute || s.music === 0;
+      this.musicEl.volume = s.mute ? 0 : (MUSIC_GAIN[s.music] ?? 1);
+    }
     if (!this.out || !this.master || !this.ctx) return;
-    const s = this.settings, t = this.ctx.currentTime;
+    const t = this.ctx.currentTime;
     this.master.gain.setTargetAtTime(s.mute ? 0 : 1, t, 0.02);
     this.out.effect.gain.setTargetAtTime(SFX_GAIN[s.sfx] ?? 1, t, 0.02);
     this.out.voice.gain.setTargetAtTime(SFX_GAIN[s.voice] ?? 1, t, 0.02);
@@ -530,9 +523,9 @@ class AudioEngine {
 
   private position(): number {
     const m = this.musicNow;
-    if (!this.ctx || !m.playing) return m.offset;
-    const dur = m.playing.src.buffer?.duration ?? 0;
-    const at = m.offset + this.ctx.currentTime - m.started;
+    if (!this.musicEl || !m.playing) return m.offset;
+    const dur = Number.isFinite(this.musicEl.duration) ? this.musicEl.duration : 0;
+    const at = this.musicEl.currentTime || m.offset;
     return m.state?.kind === 'theme' && dur ? at % dur : at;
   }
 
@@ -589,14 +582,31 @@ class AudioEngine {
     this.startMusic({ kind: 'fanfare', index: -1 }, 0);
   }
 
-  /** Stops what plays now, fading out over `fade` seconds. */
-  private halt(fade = 0.35) {
-    const m = this.musicNow;
-    if (m.playing) { m.playing.src.onended = null; this.end(m.playing, fade); }
-    m.playing = null;
+  private ensureMusicEl(): HTMLAudioElement | null {
+    if (this.musicEl) return this.musicEl;
+    if (typeof Audio === 'undefined') return null;
+    const el = new Audio();
+    el.preload = 'auto';
+    this.musicEl = el;
+    return el;
   }
 
-  /** Starts a state from `offset` seconds, crossfading from what plays. */
+  /** Stops what plays now. */
+  private halt(_fade = 0.35) {
+    this.musicToken++;
+    this.musicNow.playing = false;
+    const el = this.musicEl;
+    if (el) {
+      el.onended = null;
+      el.ontimeupdate = null;
+      el.onloadedmetadata = null;
+      try { el.pause(); } catch { /* ignore */ }
+      el.removeAttribute('src');
+      try { el.load(); } catch { /* ignore */ }
+    }
+  }
+
+  /** Starts a state from `offset` seconds, streaming via an HTMLAudioElement without keeping PCM buffers in RAM. */
   private startMusic(state: NonNullable<MusicState>, offset: number) {
     this.halt();
     const m = this.musicNow;
@@ -604,31 +614,53 @@ class AudioEngine {
     if (!this.ensure() || !this.out || this.settings.music === 0) return;
     const name = this.nameOf(state);
     if (!this.has('music', name)) return;
-    void this.buffer('music', name).then(buf => {
-      this.trimMusic(this.nameOf(m.state ?? state));
-      if (!buf || !this.ctx || !this.out || m.state !== state || m.playing) return;
-      const src = this.ctx.createBufferSource(), gain = this.ctx.createGain();
-      src.buffer = buf;
-      // Themes loop from the start (MCI "play mid from 0 notify" again, fcn_00454d2c); the cut is the
-      // sequence's last event (manifest seconds).
-      const len = this.manifest?.music?.[name] ?? musicLen(this.mset, name) ?? buf.duration;
-      const once = state.kind === 'fanfare' || (state.kind === 'theme' && !!this.mset?.themes?.[state.index]?.once);
-      if (state.kind === 'theme' && !once) { src.loop = true; src.loopStart = 0; src.loopEnd = Math.min(len, buf.duration); }
-      const t = this.ctx.currentTime;
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(1, t + 0.25);
-      src.connect(gain).connect(this.out.music);
-      const at = Math.max(0, Math.min(offset, len - 0.05));
-      if (state.kind === 'bgm' || once) src.start(t, at, Math.max(0.05, len - at));
-      else src.start(t, at);
-      m.playing = { src, gain };
-      m.started = t; m.offset = at;
-      // A background track that ends moves on to the next one (fcn_00454d2c → fcn_00454d91(0)).
-      src.onended = () => {
-        if (m.playing?.src !== src) return;
-        if (state.kind === 'bgm') { m.playing = null; this.background(0); }
-        else if (state.kind === 'fanfare') { m.playing = null; this.restore(); }
-      };
+    const el = this.ensureMusicEl();
+    if (!el) return;
+    const token = ++this.musicToken;
+    const len = this.manifest?.music?.[name] ?? musicLen(this.mset, name);
+    const once = state.kind === 'fanfare' || (state.kind === 'theme' && !!this.mset?.themes?.[state.index]?.once);
+    const looping = state.kind === 'theme' && !once;
+    el.loop = looping;
+    el.muted = this.settings.mute || this.settings.music === 0;
+    el.volume = this.settings.mute ? 0 : (MUSIC_GAIN[this.settings.music] ?? 1);
+    const at = len ? Math.max(0, Math.min(offset, len - 0.05)) : Math.max(0, offset);
+    m.offset = at;
+    m.playing = true;
+    const seek = () => {
+      if (this.musicToken !== token) return;
+      if (at > 0) {
+        try { el.currentTime = at; } catch { /* not seekable yet */ }
+      }
+    };
+    el.onloadedmetadata = () => {
+      el.onloadedmetadata = null;
+      seek();
+    };
+    el.ontimeupdate = len ? () => {
+      if (this.musicToken !== token) return;
+      if (el.currentTime >= len) {
+        if (looping) {
+          el.currentTime = 0;
+        } else {
+          el.ontimeupdate = null;
+          el.onended = null;
+          try { el.pause(); } catch { /* ignore */ }
+          m.playing = false;
+          if (state.kind === 'bgm') this.background(0);
+          else if (state.kind === 'fanfare') this.restore();
+        }
+      }
+    } : null;
+    el.onended = () => {
+      if (this.musicToken !== token || m.state !== state) return;
+      m.playing = false;
+      if (state.kind === 'bgm') this.background(0);
+      else if (state.kind === 'fanfare') this.restore();
+    };
+    el.src = this.url('music', name);
+    seek();
+    void el.play().catch(() => {
+      if (this.musicToken === token) m.playing = false;
     });
   }
 
