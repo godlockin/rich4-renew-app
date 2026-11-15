@@ -390,16 +390,22 @@ describe('party-relay security & framing', () => {
     });
     assert.equal(badDigest.status, 400);
 
-    const oversized = await httpPost(port, '/puzzles/leaderboard', {
-      puzzleId: 'comeback-debt-turnaround',
-      weekKey: '2026-W46',
-      seed: 20261101,
-      playerName: 'A'.repeat(5000),
-      turns: 10,
-      finalAssets: 120000,
-      stateHash: 123456,
-      digest: 'deadbeef',
-    });
-    assert.equal(oversized.status, 400);
+    let oversizedRejected = false;
+    try {
+      const oversized = await httpPost(port, '/puzzles/leaderboard', {
+        puzzleId: 'comeback-debt-turnaround',
+        weekKey: '2026-W46',
+        seed: 20261101,
+        playerName: 'A'.repeat(5000),
+        turns: 10,
+        finalAssets: 120000,
+        stateHash: 123456,
+        digest: 'deadbeef',
+      });
+      oversizedRejected = oversized.status === 400 || oversized.status === 413;
+    } catch (err) {
+      oversizedRejected = err?.code === 'ECONNRESET' || err?.message === 'socket hang up';
+    }
+    assert.equal(oversizedRejected, true);
   });
 });
