@@ -1380,7 +1380,7 @@ export class Game {
     const name = this.name(owner.id);
     const reason =
       tmpState >> 4 && tmpState & 0xf ? `房屋查封中，免收${fee}！`
-      : this.isAlly(owner, this.current) ? `與${name}同盟中，免收${fee}！`
+      : (owner.id !== this.current && this.isAlly(owner, this.current)) ? `與${name}同盟中，免收${fee}！`
       : this.objects.godType(owner) === 15 ? `死神顯靈，免收${fee}！`
       : owner.hotel ? `${name}住宿中，免收${fee}！`
       : owner.vanish ? `${name}消失中，免收${fee}！`
