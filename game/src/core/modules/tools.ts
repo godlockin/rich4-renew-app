@@ -993,13 +993,18 @@ export class Tools {
     return pool.length ? pool[g.rng.below(pool.length)] : null;
   }
 
+  private sameTeam(p: Player, q: Player | number): boolean {
+    const pq = typeof q === 'number' ? this.g.players[q] : q;
+    return !!pq && (p.team ?? 0) > 0 && p.team === pq.team;
+  }
+
   /** fcn_00421717: the most hostile opponent (else a random active one) if on screen and not next to oneself. */
   private judgeMissile(p: Player): number | null {
     const g = this.g, me = p.id + 1;
     let target = -1, best = 0;
-    for (let i = 0; i < g.players.length; i++) if (p.hostility[i] > best) { best = p.hostility[i]; target = i; }
+    for (let i = 0; i < g.players.length; i++) if (!this.sameTeam(p, i) && p.hostility[i] > best) { best = p.hostility[i]; target = i; }
     if (target < 0) {
-      const active = g.players.filter(q => q.id !== p.id && q.whoPlays);
+      const active = g.players.filter(q => q.id !== p.id && q.whoPlays && !this.sameTeam(p, q));
       if (!active.length) return null;
       target = active[g.rng.below(active.length)].id;
     }
@@ -1010,7 +1015,8 @@ export class Tools {
     const near = (x: number, y: number) => Math.abs(x - c.x) <= MISSILE_HALF && Math.abs(y - c.y) <= MISSILE_HALF;
     const self = g.node(p.node);
     if (near(self.x, self.y)) return null;
-    if (g.board.lands.some(l => l.owner === me && near(l.x, l.y)) || g.board.facilities.some(f => f.owner === me && near(f.x, f.y))) return null;
+    if (g.board.lands.some(l => l.owner && (l.owner === me || this.sameTeam(p, l.owner - 1)) && near(l.x, l.y))
+      || g.board.facilities.some(f => f.owner && (f.owner === me || this.sameTeam(p, f.owner - 1)) && near(f.x, f.y))) return null;
     return q.node;
   }
 
@@ -1087,7 +1093,7 @@ export class Tools {
       ...g.board.lands.map(l => ({ x: l.x, y: l.y, owner: l.owner, level: l.level, ref: l.id + 2000 })),
       ...g.board.facilities.map(f => ({ x: f.x, y: f.y, owner: f.owner, level: f.level, ref: f.id + 4000 })),
     ];
-    const cands = lots.filter(l => l.owner && l.owner !== me && l.level !== 0);
+    const cands = lots.filter(l => l.owner && l.owner !== me && !this.sameTeam(p, l.owner - 1) && l.level !== 0);
     if (!cands.length) return null;
     const self = g.node(p.node), k = 1 / (g.living().length + 2);
     for (let i = 0; i < 10; i++) {
@@ -1097,7 +1103,7 @@ export class Tools {
       let mine = 0, theirs = 0, mineLv = 0, theirLv = 0;
       for (const l of lots) {
         if (!l.owner || !near(l.x, l.y)) continue;
-        if (l.owner === me) { mine++; mineLv += l.level; } else { theirs++; theirLv += l.level; }
+        if (l.owner === me || this.sameTeam(p, l.owner - 1)) { mine++; mineLv += l.level; } else { theirs++; theirLv += l.level; }
       }
       if (mine / theirs < k && mineLv / theirLv < k) return c.ref;
     }

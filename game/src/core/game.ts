@@ -345,6 +345,7 @@ export class Game {
         luckBad: 0, luckMoney: 0, luckFate: 0, facility: 0,
         savedTraffic: 0, savedDice: 0, sleepTraffic: 0, sleepDice: 0,
         tools: new Array(15).fill(0), cards: [],
+        ...((settings.teams?.[id] ?? 0) > 0 ? { team: settings.teams![id] } : {}),
         ...(s.nick ? { nick: s.nick } : {}),
       };
     });
@@ -540,6 +541,16 @@ export class Game {
     const q = this.players[p.ally - 1];
     if (q.ally === p.id + 1) { q.ally = 0; q.allyDays = 0; }
     p.ally = 0; p.allyDays = 0;
+  }
+
+  /** Whether two players are allies (same player, same fixed team > 0, or active ally card). */
+  isAlly(a: Player | number, b: Player | number): boolean {
+    const pa = typeof a === 'number' ? this.players[a] : a;
+    const pb = typeof b === 'number' ? this.players[b] : b;
+    if (!pa || !pb) return false;
+    if (pa.id === pb.id) return true;
+    if ((pa.team ?? 0) > 0 && pa.team === pb.team) return true;
+    return pa.ally === pb.id + 1 || pb.ally === pa.id + 1;
   }
 
   // ---------------------------------------------------------------- money
@@ -926,7 +937,8 @@ export class Game {
   private *finish(winner: number): Flow {
     for (const p of this.players) if (p.id !== winner) p.whoPlays = 0;
     const humans = this.players.filter(p => p.human).length;
-    const humanWon = this.players[winner]?.human ?? false;
+    const winTeam = this.players[winner]?.team ?? 0;
+    const humanWon = this.players.some(p => p.human && !p.bankrupt && (p.id === winner || (winTeam > 0 && p.team === winTeam)));
     const code = humans === 1 ? (humanWon ? 2 : 1) : humanWon ? 3 : 1;
     this.over = { winner, code };
     yield { t: 'gameover', winner, code };
@@ -1359,7 +1371,7 @@ export class Game {
     }
     const death = this.objects.deathPayer(this.players[payer]);
     if (death !== null) { yield* this.say(undefined, `死神顯靈\n\n由${this.name(death)}賠償${fee}`); payer = death; }
-    if (payer === owner.id || payer === owner.ally - 1) return null;
+    if (this.isAlly(payer, owner)) return null;
     return { payer, amount };
   }
 
@@ -1368,7 +1380,7 @@ export class Game {
     const name = this.name(owner.id);
     const reason =
       tmpState >> 4 && tmpState & 0xf ? `房屋查封中，免收${fee}！`
-      : owner.ally === this.current + 1 ? `與${name}同盟中，免收${fee}！`
+      : this.isAlly(owner, this.current) ? `與${name}同盟中，免收${fee}！`
       : this.objects.godType(owner) === 15 ? `死神顯靈，免收${fee}！`
       : owner.hotel ? `${name}住宿中，免收${fee}！`
       : owner.vanish ? `${name}消失中，免收${fee}！`
@@ -1518,7 +1530,7 @@ export class Game {
     if (amount > 0) {
       const death = this.objects.deathPayer(this.players[payer]);
       if (death !== null) { yield* this.say(undefined, `死神顯靈\n\n由${this.name(death)}賠償${fee}`); payer = death; }
-      if (payer !== owner.id && payer !== owner.ally - 1) f.lastFee = yield* this.transfer(payer, owner.id, amount, 0, fee);
+      if (!this.isAlly(payer, owner)) f.lastFee = yield* this.transfer(payer, owner.id, amount, 0, fee);
     }
     return stayer;
   }
@@ -1614,7 +1626,12 @@ export class Game {
     const living = this.living(), humans = living.filter(q => q.human);
     if (this.players.filter(q => q.human).length === 1 && p.human) { yield* this.lose(); return; }
     if (!humans.length) { this.over = { winner: living[0]?.id ?? -1, code: 1 }; yield { t: 'gameover', winner: living[0]?.id ?? -1, code: 1 }; return; }
-    if (living.length === 1) { yield* this.finish(living[0].id); return; }
+    const teamWin = living.length > 0 && (living[0].team ?? 0) > 0 && living.every(q => q.team === living[0].team);
+    if (living.length === 1 || teamWin) {
+      const best = living.reduce((a, b) => (this.wealth(b) > this.wealth(a) ? b : a));
+      yield* this.finish(best.id);
+      return;
+    }
     const owner = p.id + 1, released: number[] = [];
     for (const l of this.board.lands) if (l.owner === owner) { l.owner = 0; l.expire = 0; released.push(l.id + 2000); }
     for (const f of this.board.facilities) if (f.owner === owner) { f.owner = 0; f.expire = 0; released.push(f.id + 4000); }

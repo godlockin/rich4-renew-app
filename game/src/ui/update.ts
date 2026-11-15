@@ -12,8 +12,9 @@
  * new installer. Nothing on screen names a server (the user): only 「更新」.
  */
 import { Capacitor } from '@capacitor/core';
-import { Directory, Filesystem } from '@capacitor/filesystem';
 import { audio } from './audio';
+
+const fs = () => import('@capacitor/filesystem');
 
 const SERVER = 'https://rich.areu.pro/u';
 const DIR = 'rich4-update';
@@ -91,18 +92,20 @@ function store(): Store | null {
     list: () => desk.list(),
   };
   if (!Capacitor.isNativePlatform()) return null;
-  const at = (n: string) => ({ path: `${DIR}/${n}`, directory: Directory.Library });
   return {
-    read: async n => { try { const r = await Filesystem.readFile(at(n)); return typeof r.data === 'string' ? unb64(r.data) : new Uint8Array(await r.data.arrayBuffer()); } catch { return null; } },
-    write: async (n, d) => { await Filesystem.writeFile({ ...at(n), data: b64(typeof d === 'string' ? new TextEncoder().encode(d) : d), recursive: true }); },
+    read: async n => { const { Directory, Filesystem } = await fs(); try { const r = await Filesystem.readFile({ path: `${DIR}/${n}`, directory: Directory.Library }); return typeof r.data === 'string' ? unb64(r.data) : new Uint8Array(await r.data.arrayBuffer()); } catch { return null; } },
+    write: async (n, d) => { const { Directory, Filesystem } = await fs(); await Filesystem.writeFile({ path: `${DIR}/${n}`, directory: Directory.Library, data: b64(typeof d === 'string' ? new TextEncoder().encode(d) : d), recursive: true }); },
     remove: async n => {
-      try { const s = await Filesystem.stat(at(n)); if (s.type === 'directory') await Filesystem.rmdir({ ...at(n), recursive: true }); else await Filesystem.deleteFile(at(n)); } catch { /* gone */ }
+      const { Directory, Filesystem } = await fs();
+      const at = { path: `${DIR}/${n}`, directory: Directory.Library };
+      try { const s = await Filesystem.stat(at); if (s.type === 'directory') await Filesystem.rmdir({ ...at, recursive: true }); else await Filesystem.deleteFile(at); } catch { /* gone */ }
     },
     rename: async (a, b) => {
-      try { await Filesystem.rmdir({ ...at(b), recursive: true }); } catch { /* none */ }
+      const { Directory, Filesystem } = await fs();
+      try { await Filesystem.rmdir({ path: `${DIR}/${b}`, directory: Directory.Library, recursive: true }); } catch { /* none */ }
       await Filesystem.rename({ from: `${DIR}/${a}`, to: `${DIR}/${b}`, directory: Directory.Library, toDirectory: Directory.Library });
     },
-    list: async () => { try { return (await Filesystem.readdir({ path: DIR, directory: Directory.Library })).files.map(f => f.name); } catch { return []; } },
+    list: async () => { const { Directory, Filesystem } = await fs(); try { return (await Filesystem.readdir({ path: DIR, directory: Directory.Library })).files.map(f => f.name); } catch { return []; } },
   };
 }
 const text = async (s: Store, n: string) => { const b = await s.read(n); return b ? new TextDecoder().decode(b).trim() : null; };

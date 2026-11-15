@@ -46,6 +46,8 @@ export interface GameSettings {
    * holidays, plus 1 random card gifted to each living player on marked holidays.
    */
   holidays?: boolean;
+  /** Fixed team IDs per player index (0 or omitted = free-for-all; > 0 = team ID). */
+  teams?: number[];
 }
 
 export const FUNDS = [300000, 200000, 100000, 50000, 30000, 10000];
@@ -106,6 +108,8 @@ export interface Player {
   bomb: number;
   /** Ally's id + 1. */
   ally: number;
+  /** Fixed team ID (0 or omitted = free-for-all; > 0 = team ID). */
+  team?: number;
   /** hostility[q] = how much this player resents q (AI target choice). */
   hostility: number[];
   monthLoss: number;
