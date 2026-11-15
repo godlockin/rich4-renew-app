@@ -5,8 +5,11 @@
  * 粉圓 (jf open 粉圓, OFL; traditional only — simplified-only characters come from the system), 文楷 (LXGW WenKai TC,
  * OFL), 圓體 (Chiron GoRound TC, OFL), 系統 (the device's own: PingFang on Apple, Noto on Android). Kept on the device.
  */
-import '@fontsource/lxgw-wenkai-tc/400.css';
-import '@fontsource/chiron-goround-tc/400.css';
+// Default font (@fontsource/huninn) is imported eagerly in main.ts; secondary fonts load on demand.
+const FONT_LOADERS: Record<number, () => Promise<unknown>> = {
+  1: () => import('@fontsource/lxgw-wenkai-tc/400.css'),
+  2: () => import('@fontsource/chiron-goround-tc/400.css'),
+};
 
 export const FONTS: readonly { label: string; family: string }[] = [
   { label: '粉圓', family: '"Huninn"' },
@@ -24,7 +27,10 @@ export const uiFont = () => FONTS[fontMode()].family;
 
 /** Puts the chosen font on the page (at start and after a choice). */
 export function applyFont() {
-  if (typeof document !== 'undefined') document.documentElement.style.setProperty('--ui-font', uiFont());
+  const mode = fontMode();
+  const load = FONT_LOADERS[mode];
+  if (load) void load();
+  if (typeof document !== 'undefined') document.documentElement.style.setProperty('--ui-font', FONTS[mode].family);
 }
 export function setFont(i: number) {
   try { localStorage.setItem(KEY, String(i)); } catch { /* not kept */ }
