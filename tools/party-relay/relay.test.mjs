@@ -163,6 +163,29 @@ function httpGet(port, pathname) {
   });
 }
 
+function httpPost(port, pathname, payload) {
+  const data = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1',
+      port,
+      path: pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      },
+    }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
 describe('party-relay security & framing', () => {
   let proc;
   let port;
@@ -307,5 +330,76 @@ describe('party-relay security & framing', () => {
     const health = await httpGet(port, '/health');
     assert.equal(health.status, 200);
     assert.equal(health.body.ok, true);
+  });
+
+  it('stores, ranks, and caps weekly puzzle leaderboard submissions', async () => {
+    const weekKey = '2026-W46';
+    const base = {
+      puzzleId: 'comeback-debt-turnaround',
+      weekKey,
+      seed: 20261101,
+      stateHash: 12345678,
+      digest: 'deadbeef',
+    };
+
+    // Submit 3 entries with different turns and finalAssets
+    const r1 = await httpPost(port, '/puzzles/leaderboard', { ...base, playerName: 'SlowRich', turns: 15, finalAssets: 200000 });
+    assert.equal(r1.status, 200);
+    assert.equal(r1.body.ok, true);
+
+    const r2 = await httpPost(port, '/puzzles/leaderboard', { ...base, playerName: 'FastPoor', turns: 10, finalAssets: 125000 });
+    assert.equal(r2.status, 200);
+    assert.equal(r2.body.rank, 1);
+
+    const r3 = await httpPost(port, '/puzzles/leaderboard', { ...base, playerName: 'FastRich', turns: 10, finalAssets: 160000 });
+    assert.equal(r3.status, 200);
+    assert.equal(r3.body.rank, 1);
+
+    // Submit 20 more entries to verify top 20 cap on GET
+    for (let i = 0; i < 20; i++) {
+      await httpPost(port, '/puzzles/leaderboard', {
+        ...base,
+        playerName: `Player-${i}`,
+        turns: 20 + i,
+        finalAssets: 120000 + i,
+      });
+    }
+
+    const res = await httpGet(port, `/puzzles/leaderboard?week=${weekKey}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.week, weekKey);
+    assert.equal(res.body.entries.length, 20);
+    assert.equal(res.body.entries[0].playerName, 'FastRich');
+    assert.equal(res.body.entries[1].playerName, 'FastPoor');
+    assert.equal(res.body.entries[2].playerName, 'SlowRich');
+  });
+
+  it('rejects invalid or oversized puzzle leaderboard requests', async () => {
+    const missingWeek = await httpGet(port, '/puzzles/leaderboard');
+    assert.equal(missingWeek.status, 400);
+
+    const badDigest = await httpPost(port, '/puzzles/leaderboard', {
+      puzzleId: 'comeback-debt-turnaround',
+      weekKey: '2026-W46',
+      seed: 20261101,
+      playerName: 'BadDigest',
+      turns: 10,
+      finalAssets: 120000,
+      stateHash: 123456,
+      digest: 'not-hex!',
+    });
+    assert.equal(badDigest.status, 400);
+
+    const oversized = await httpPost(port, '/puzzles/leaderboard', {
+      puzzleId: 'comeback-debt-turnaround',
+      weekKey: '2026-W46',
+      seed: 20261101,
+      playerName: 'A'.repeat(5000),
+      turns: 10,
+      finalAssets: 120000,
+      stateHash: 123456,
+      digest: 'deadbeef',
+    });
+    assert.equal(oversized.status, 400);
   });
 });
