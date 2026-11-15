@@ -21,8 +21,30 @@ const DIR = 'rich4-update';
 export const RUNNING = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0';
 
 type Files = Record<string, [string, number]>;
-interface Manifest { version: string; shell: number; files: Files }
+interface Manifest { version: string; shell: number; files: Files; sig?: string }
 export interface Latest { version: string; shell: number }
+
+/**
+ * 遠端清單公鑰（SPKI Base64，ECDSA P-256）。
+ * 設定公鑰後，所有線上更新清單必須附帶有效簽名才會套用，防止中間人或 CDN 劫持注入惡意腳本。
+ */
+export const MANIFEST_PUBLIC_KEY = '';
+
+/** 驗證更新清單的數位簽名（未設定公鑰時僅檢查清單結構；設定公鑰時強制驗簽）。 */
+export async function verifyManifestSignature(m: Manifest, pubKeyB64 = MANIFEST_PUBLIC_KEY): Promise<boolean> {
+  if (!m || typeof m.version !== 'string' || typeof m.shell !== 'number' || !m.files || typeof m.files !== 'object') return false;
+  if (!pubKeyB64) return true;
+  if (typeof m.sig !== 'string' || !m.sig || !globalThis.crypto?.subtle) return false;
+  try {
+    const spki = Uint8Array.from(atob(pubKeyB64), c => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey('spki', spki, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    const canonical = `${m.version}:${m.shell}:${Object.keys(m.files).sort().map(k => `${k}=${m.files[k]?.[0] ?? ''}`).join(',')}`;
+    const sigBytes = Uint8Array.from(atob(m.sig), c => c.charCodeAt(0));
+    return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sigBytes, new TextEncoder().encode(canonical));
+  } catch {
+    return false;
+  }
+}
 export type UpdateState =
   | { kind: 'none' }                                   // the newest, or nothing to compare with (no answer, the web)
   | { kind: 'ready'; version: string }                 // can be updated in the game
@@ -136,6 +158,7 @@ export async function applyUpdate(version: string, progress: (done: number, tota
   if (!s) throw new Error('這個版本不能在遊戲裡更新');
   const [m, mine] = await Promise.all([getJson<Manifest>(`${base()}/m/${version}.json`, 30000), installed()]);
   if (!m || !mine) throw new Error('暫時無法下載更新，請稍後再試');
+  if (!(await verifyManifestSignature(m))) throw new Error('更新清單驗證失敗，已取消安裝');
   // The version running now, when it is a downloaded one: its files can be taken over.
   const runningDir = RUNNING !== mine.version ? `v${RUNNING}` : '';
   let have: Files = {};
@@ -148,7 +171,7 @@ export async function applyUpdate(version: string, progress: (done: number, tota
   progress(0, total);
   let next = 0;
   const one = async ([p, [h, size]]: [string, [string, number]]) => {
-    if (p.includes('..') || p.startsWith('/')) throw new Error('更新檔案有誤');
+    if (p.includes('..') || p.startsWith('/') || p.includes('\\')) throw new Error('更新檔案有誤');
     let data: Uint8Array | null = have[p]?.[0] === h ? await s.read(`${runningDir}/${p}`) : null;
     const copied = !!data;
     for (let attempt = 0; !data && attempt < 3; attempt++) {

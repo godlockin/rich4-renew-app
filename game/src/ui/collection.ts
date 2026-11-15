@@ -125,6 +125,53 @@ export async function loadCards(): Promise<Cards> {
   return cache;
 }
 
+/** 合併外部匯入的圖鑑記錄（如存檔備份還原），保留最高星數與最早解鎖時間。 */
+export async function importCards(incoming: unknown): Promise<number> {
+  const clean = parse(typeof incoming === 'string' ? incoming : JSON.stringify(incoming ?? {}));
+  const keys = Object.keys(clean);
+  if (!keys.length) return 0;
+  const had = await loadCards();
+  const next = merge(had, clean);
+  cache = next;
+  try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* the file has it */ }
+  await writeFile(next);
+  return keys.length;
+}
+
+/** 圖鑑里程碑獎勵定義（外顯稱號與局內視覺回饋）。 */
+export interface CollectionReward {
+  at: number;
+  title: string;
+  perk: string;
+}
+
+export const COLLECTION_REWARDS: readonly CollectionReward[] = [
+  { at: 25, title: '地產新秀', perk: '解鎖「地產新秀」名片徽章' },
+  { at: 100, title: '股市操盤手', perk: '解鎖「金算盤」頭像框' },
+  { at: 250, title: '大富翁大師', perk: '解鎖「流光骰子」步數特效' },
+  { at: 425, title: '全圖鑑傳奇', perk: '解鎖「全圖鑑傳奇」金色動態稱號' },
+];
+
+/** 查詢目前收集數已解鎖的外顯獎勵清單。 */
+export function unlockedRewards(have: number, total: number): CollectionReward[] {
+  return COLLECTION_REWARDS.filter(r => have >= (r.at >= 425 ? total : r.at));
+}
+
+/** 圖鑑里程碑稱號與下一階目標。 */
+export function collectionRank(have: number, total: number): { title: string; nextAt: number | null; nextPerk: string | null } {
+  if (total > 0 && have >= total) return { title: '全圖鑑傳奇', nextAt: null, nextPerk: null };
+  for (let i = COLLECTION_REWARDS.length - 1; i >= 0; i--) {
+    const cur = COLLECTION_REWARDS[i];
+    const threshold = cur.at >= 425 ? total : cur.at;
+    if (have >= threshold) {
+      const next = COLLECTION_REWARDS[i + 1];
+      return { title: cur.title, nextAt: next ? (next.at >= 425 ? total : next.at) : null, nextPerk: next?.perk ?? null };
+    }
+  }
+  const first = COLLECTION_REWARDS[0];
+  return { title: '初入江湖', nextAt: first.at, nextPerk: first.perk };
+}
+
 /** The stars this device has on a card (0: not earned); a game takes a proof picture only for more. */
 export async function cardStars(id: string): Promise<number> { return (await loadCards())[id]?.s ?? 0; }
 
@@ -274,12 +321,16 @@ export async function openCollection(root: HTMLElement, mapName: (id: number) =>
   const cards = await loadCards();
   const groups = [{ id: -1, name: '通用' }, { id: -2, name: '每月任務' }, ...CHALLENGE_MAPS.map(id => ({ id, name: mapName(id) }))];
   const total = ALL.length, have = ALL.filter(t => cards[t.id]).length;
+  const rank = collectionRank(have, total);
+  const perks = unlockedRewards(have, total);
   const starsOf = (id: string) => cards[id]?.s ?? 0;
   let group = 0, page = 0, perPage = 8;
   const overlay = document.createElement('div');
   overlay.className = 'col-overlay';
+  const nextTip = rank.nextAt ? `・下一階 ${rank.nextAt} 張：${esc(rank.nextPerk ?? '')}` : '・已解鎖全部里程碑獎勵';
+  const perkTip = perks.length ? `（已解鎖 ${perks.length} 項外觀獎勵）` : '';
   overlay.innerHTML = `<div class="msg sheet col-sheet"><div class="ribbon">圖鑑</div>
-    <p class="col-count">已收集 ${have} / ${total} 張</p>
+    <p class="col-count">已收集 ${have} / ${total} 張・稱號：${esc(rank.title)}${perkTip}${nextTip}</p>
     <div class="col-group"><button class="chip" data-g="-1">‹</button><b></b><button class="chip" data-g="1">›</button></div>
     <div class="col-grid"></div>
     <div class="col-nav"><button class="chip" data-p="-1">‹</button><span></span><button class="chip" data-p="1">›</button></div>

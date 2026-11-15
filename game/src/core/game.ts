@@ -5,10 +5,11 @@
  */
 import { companyOf, facilityOf, landOf, nodeById, type Board, type BoardNode, type Facility, type Land } from './board';
 import { CHARACTERS, playerName } from './characters';
-import { addDays, addMonths, daysBetween, day as dayOf, nextDay, weekday, type PackedDate } from './date';
+import { addDays, addMonths, daysBetween, day as dayOf, nextDay, type PackedDate } from './date';
 import { ask, type Flow } from './flow';
 import { Rng, daySeed } from './rng';
 import { BlackMarket } from './modules/blackmarket';
+import { Finance } from './modules/finance';
 import { Forks, type ForkWalk } from './modules/forks';
 import { Cards } from './modules/cards';
 import { Events } from './modules/events';
@@ -295,6 +296,8 @@ export class Game {
   readonly forks: Forks;
   /** The smarter computer (core/smart-ai.ts): 派對模式, and a normal game's 中級 / 困難 (`aiLevel`). */
   readonly smart: SmartAi;
+  /** 銀行與特別融資子模組（core/modules/finance.ts）。 */
+  readonly finance: Finance;
   date: PackedDate;
   daysElapsed = 0;
   monthsElapsed = 0;
@@ -353,6 +356,7 @@ export class Game {
     this.blackMarket = new BlackMarket(this);
     this.forks = new Forks(this);
     this.smart = new SmartAi(this);
+    this.finance = new Finance(this);
     this.cards.init();
     this.tools.init();
     this.places.init();
@@ -846,14 +850,7 @@ export class Game {
       yield* this.places.lotteryDraw();
     }
     if (newMonth) {
-      // Monthly bank settlement fcn_00439bfa (docs/rules/02 §8.5): 10% on deposits for players without a loan.
-      // Special-financing money sits in the deposit and earns it too (bug decision #13: kept as in the original).
-      // The original shows its report screen here (09 §7.12): the figures are taken before and after the interest.
-      const rows = this.living().map(p => ({ p: p.id, character: p.character, bank: p.bank, loan: p.loan !== 0, interest: p.loan ? 0 : Math.trunc(p.bank * 0.1) }));
-      for (const p of this.players) if (p.whoPlays && p.loan === 0) p.bank = Math.trunc(p.bank * 1.1);
-      // 大富翁城 (chips only, 19 §9): no deposits, so no bank settlement to show.
-      if (!this.rules?.chipsOnly) yield { t: 'fx', kind: 'month-report', data: this.monthReport(rows) as unknown as Record<string, unknown> };
-      for (const p of this.players) { p.monthLoss = 0; p.monthGain = 0; p.monthBadDays = 0; }
+      yield* this.finance.monthlySettlement();
       yield* this.objects.monthly();
       yield* this.blackMarket.monthly();
       this.monthsElapsed += 1;
@@ -866,28 +863,9 @@ export class Game {
     yield { t: 'board' };
   }
 
-  /**
-   * The month report's picks (fcn_00439bfa state 2, docs/rules/02 §8.5): 本月悲情人物 fcn_00437d1a and 本月冠軍
-   * fcn_00437dfe over the living players in id order, after the interest and before the monthly counters are cleared.
-   */
+  /** 月結報表（委派給 core/modules/finance.ts）。 */
   monthReport(rows: Omit<MonthReport['rows'][number], 'after'>[]): MonthReport {
-    const list = rows.map(r => this.players[r.p]);
-    // Bad luck score: loss − windfall + bad days × PI × 2500 + bad-luck value × 10 (32-bit, as the original).
-    const score = list.map(p => ((p.monthLoss - p.monthGain) + Math.imul(Math.imul(p.monthBadDays & 0xff, this.priceIndex), 2500) + Math.imul(p.luckBad, 10)) | 0);
-    let top = 0, at = 0;
-    score.forEach((v, i) => { if (v > top) { top = v; at = i; } });
-    // Everyone tied with the top drops out of the runner-up; named only when someone else scored and the lead is > 40%.
-    const second = score.reduce((m, v) => (v !== top && v > m ? v : m), 0);
-    const unlucky = top !== 0 && second !== 0 && (top - second) / top > 0.4 ? at : -1;
-    let best = 0, champion = 0;
-    list.forEach((p, i) => { const w = this.wealth(p); if (w > best) { best = w; champion = i; } });
-    const u = list[unlucky], c = list[champion];
-    return {
-      rows: rows.map(r => ({ ...r, after: this.players[r.p].bank })),
-      unlucky, champion, animation: this.animation,
-      unluckyStats: u ? { loss: u.monthLoss, gain: u.monthGain, badDays: u.monthBadDays & 0xff } : null,
-      championStats: c ? { cash: c.cash, bank: c.bank, wealth: this.wealth(c) } : null,
-    };
+    return this.finance.monthReport(rows);
   }
 
   /** Price index _rich4_update_price_index (docs/rules/02 §1): only ever rises. */
@@ -1195,6 +1173,11 @@ export class Game {
     const n = this.node(p.node);
     if (n.event === 14 && !p.sleepwalk && left !== 0 && this.objects.at(n.id)?.type !== 16) {
       yield* this.atm(p);
+      if (this.over) return 0;
+    }
+    // 大富豪模式：真人玩家路過車站/機場時也可選擇購票跨城，提升五城機動性
+    if ((n.event === 17 || n.event === 18) && this.world && !p.sleepwalk && left !== 0 && this.isHuman(p) && this.objects.at(n.id)?.type !== 16) {
+      if (yield* this.world.hooks.travelSquare(this, p, left)) return 0;
       if (this.over) return 0;
     }
     const other = this.players.find(q => q.id !== p.id && q.placed && q.node === n.id && !this.offRoad(q));
@@ -1583,169 +1566,15 @@ export class Game {
     return run.value;
   }
 
-  // ---------------------------------------------------------------- bank (docs/rules/02 §8)
+  // ---------------------------------------------------------------- bank (delegated to core/modules/finance.ts)
 
-  *atm(p: Player): Flow {
-    if (this.rules?.chipsOnly) return; // 大富翁城: chips only, no deposits (docs/rules/19 §2)
-    if (p.bankRefused) {
-      if (this.isHuman(p)) yield* this.say(p.id, `銀行拒絕往來還剩${(p.bankRefused & 0x7f) + 1}天`);
-      return;
-    }
-    if (this.isHuman(p)) {
-      const a = (yield ask({ t: 'bank', p: p.id, counter: false, maxLoan: 0, canWithdraw: !p.noLoan, canBorrow: false })) as { deposit?: number; withdraw?: number } | undefined;
-      if (a?.deposit) { const x = Math.min(a.deposit, p.cash); p.cash -= x; p.bank += x; }
-      if (a?.withdraw && !p.noLoan) {
-        const x = Math.min(a.withdraw, p.bank); p.bank -= x; p.cash += x;
-        yield { t: 'bank', p: p.id };
-        yield* this.financeReserve(p); // only after a withdrawal (rich4_ui_bank.asm:4930)
-        return;
-      }
-      yield { t: 'bank', p: p.id };
-      return;
-    }
-    if (this.smartAi(p)) { this.smart.atm(p); yield { t: 'bank', p: p.id }; yield* this.financeReserve(p); return; }
-    // Computer ATM: steer cash towards the character's cash ratio (more early in the month, less late).
-    const total = p.cash + p.bank;
-    if (total <= 0) return;
-    let target = CHARACTERS[p.character].cashRatio / 100;
-    const d = dayOf(this.date);
-    if (d <= 7) target *= 1.5; else if (d >= 26) target *= 0.5;
-    if (target >= 1) target = 0.9; else if (target <= 0) target = 0.1;
-    if (Math.abs(p.cash / total - target) < 0.25 && p.cash !== 0) return;
-    p.cash = Math.trunc(total * target);
-    p.bank = total - p.cash;
-    yield { t: 'bank', p: p.id };
-    yield* this.financeReserve(p); // after every adjustment, deposit or withdrawal (:5211)
-  }
-
-  /** Loan due date fcn_00433b7e: 90 days, moved past Sundays (holidays join once the holiday table is remade). */
-  setLoanDue(p: Player) {
-    if (p.loanDue) return;
-    let due = addDays(this.date, 90);
-    while (weekday(due) === 0) due = addDays(due, 1);
-    p.loanDue = due;
-  }
-
-  /**
-   * The counter _rich4_ui_bank_entry (02 §8.4, §8.6, §8.7). Only a human (not on autopilot) whose bank tile
-   * belongs to a company he controls gets the chairman's room; computers never use special financing.
-   */
-  *bankCounter(p: Player): Flow {
-    if (p.bankRefused || this.rules?.noLoans) return; // 大富翁城's finale: chips, no loans (docs/rules/19 §2)
-    const wealth = this.wealth(p);
-    // 挑戰模式 (docs/rules/26 §2): in debt, no loans and no special financing.
-    const indebted = this.challenge && p.cash < 0;
-    if (this.isHuman(p)) {
-      const company = companyOf(this.board, this.node(p.node));
-      const finance = company && company.controller === p.id + 1 && !indebted ? { total: this.otherDeposits(p), used: p.specialFinance } : undefined;
-      const a = (yield ask({ t: 'bank', p: p.id, counter: true, maxLoan: Math.max(0, wealth - p.loan), canWithdraw: !p.noLoan, canBorrow: !p.noLoan && !indebted, finance })) as
-        { borrow?: number; repay?: number; finance?: number; financeRepay?: number } | undefined;
-      if (finance && a?.finance && !p.noLoan) {
-        // 週轉現金 (fcn_00434492, rich4_ui_bank.asm:1080-1105): up to the other players' deposits less what is out, into the deposit.
-        const x = Math.min(Math.trunc(a.finance), finance.total - p.specialFinance);
-        if (x > 0) { p.bank += x; p.specialFinance += x; }
-      }
-      if (finance && a?.financeRepay) {
-        // 歸還款項 (:1107-1145): deposit first, then cash; refused when both together are short.
-        const x = Math.min(Math.trunc(a.financeRepay), p.specialFinance);
-        if (x > 0 && x <= p.cash + p.bank) {
-          p.bank -= x;
-          if (p.bank < 0) { p.cash += p.bank; p.bank = 0; }
-          p.specialFinance -= x;
-        }
-      }
-      if (a?.borrow && !p.noLoan && !indebted) {
-        const x = Math.min(a.borrow, Math.max(0, wealth - p.loan));
-        if (x > 0) { p.bank += x; p.loan += x; this.setLoanDue(p); }
-      }
-      if (a?.repay) {
-        const x = Math.min(a.repay, p.loan);
-        if (x <= p.cash + p.bank) {
-          const fromBank = Math.min(x, p.bank); p.bank -= fromBank; p.cash -= x - fromBank;
-          p.loan -= x;
-          if (!p.loan) p.loanDue = 0;
-        }
-      }
-      yield { t: 'bank', p: p.id };
-      return;
-    }
-    if (indebted) { yield { t: 'bank', p: p.id }; return; }
-    if (this.smartAi(p)) { this.smart.bankCounter(p); yield { t: 'bank', p: p.id }; return; }
-    const ch = CHARACTERS[p.character], money = p.cash + p.bank;
-    // 大富豪模式 (the user 2026-10-19: computers borrowed against their land and went bankrupt at the due date): it repays
-    // as soon as it can, borrows only when short, and never more than the money it already has.
-    const tycoon = !!this.world;
-    if (p.loan) {
-      const d = daysBetween(this.date, p.loanDue);
-      if (tycoon ? money >= 1.2 * p.loan : 2 * p.loan < p.bank || (d <= 6 && p.cash + p.bank >= 1.1 * p.loan)) {
-        yield* this.forcedDebit(p, p.loan);
-        p.loan = 0; // the original leaves the due date in place here
-        if (tycoon) { p.loanDue = 0; p.loanRenewed = undefined; }
-      }
-    } else if (this.rng.below(10) !== 0 && p.cash + p.bank >= 30000) {
-      // enough money: no loan
-    } else if (tycoon && money >= 20000 * this.priceIndex) {
-      // 大富豪模式: not short of money: no loan
-    } else if (!p.noLoan && ch.loanRatio) {
-      let loan = Math.trunc((ch.loanRatio * wealth) / 100);
-      if (tycoon) loan = Math.min(loan, Math.max(10000 * this.priceIndex, money));
-      if (loan > 0) { p.loan = loan; p.bank += loan; this.setLoanDue(p); }
-    }
-    yield { t: 'bank', p: p.id };
-  }
-
-  // ---------------------------------------------------------------- special financing (docs/rules/02 §8.7)
-
-  /** 客戶存款總額 of the chairman's room: every other player's deposit (:970-1005, bankrupt players hold 0). */
-  otherDeposits(p: Player): number {
-    return this.players.reduce((a, q) => (q.id === p.id ? a : a + q.bank), 0);
-  }
-
-  /** The bank's operator for fcn_00436b0a: the controller of the last category-7 company that has one, or null. */
-  bankOperator(): Player | null {
-    let op: Player | null = null;
-    for (const c of this.board.companies) if (c.category === 7 && c.controller) op = this.players[c.controller - 1] ?? null;
-    return op;
-  }
-
-  /**
-   * Reserve check fcn_00436b0a(1) (rich4_ui_bank.asm:3855-3970), after an ATM withdrawal or a computer's ATM
-   * adjustment by `p`: when the other living players' deposits fall below the operator's special financing,
-   * the operator covers the gap by forced debit (can bankrupt him) and his financing shrinks by it.
-   */
-  *financeReserve(p: Player): Flow {
-    const op = this.bankOperator();
-    if (!op || op.id === p.id || !op.specialFinance) return;
-    const deposits = this.players.reduce((a, q) => (q.id === op.id || !q.whoPlays ? a : a + q.bank), 0);
-    if (deposits >= op.specialFinance) return;
-    const short = op.specialFinance - deposits;
-    yield* this.say(undefined, `銀行資金準備\n\n不足${short}元\n\n由經營者${this.name(op.id)}墊付！`);
-    yield* this.forcedDebit(op, short);
-    op.specialFinance = Math.max(0, op.specialFinance - short);
-    yield { t: 'bank', p: op.id };
-  }
-
-  /**
-   * Change of operator fcn_00436b0a(0) (:3971-4030): every living player other than the operator who still has
-   * special financing repays it at once by forced debit. Runs where control can change hands: after a
-   * computer's share trading, after the human's stock market and trade screens, after the two fate cards that
-   * sell shares. Without any operator, everybody's financing is recalled.
-   */
-  *financeRecall(): Flow {
-    const op = this.bankOperator();
-    // 大富豪模式: each city's bank has its operator; only who runs none of them repays (docs/rules/17 §6).
-    const ops = this.world ? this.world.hooks.bankOperators() : [];
-    for (const q of this.players) {
-      if (q === op || ops.includes(q) || !q.whoPlays || !q.specialFinance) continue;
-      yield* this.say(undefined, '銀行經營權易主！');
-      yield* this.say(undefined, `${this.name(q.id)}\n\n強制償還${q.specialFinance}元\n\n銀行特別融資！`);
-      const s = q.specialFinance;
-      yield* this.forcedDebit(q, s);
-      q.specialFinance = 0;
-      yield { t: 'bank', p: q.id };
-      if (this.over) return;
-    }
-  }
+  *atm(p: Player): Flow { yield* this.finance.atm(p); }
+  setLoanDue(p: Player) { this.finance.setLoanDue(p); }
+  *bankCounter(p: Player): Flow { yield* this.finance.bankCounter(p); }
+  otherDeposits(p: Player): number { return this.finance.otherDeposits(p); }
+  bankOperator(): Player | null { return this.finance.bankOperator(); }
+  *financeReserve(p: Player): Flow { yield* this.finance.financeReserve(p); }
+  *financeRecall(): Flow { yield* this.finance.financeRecall(); }
 
   // ---------------------------------------------------------------- bankruptcy (docs/rules/02 §9.3, 01 §8.2)
 

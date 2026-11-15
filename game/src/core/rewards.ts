@@ -28,25 +28,26 @@ export const GRADE_BACKS: readonly Grade[] = [0, 0, 0, 0, 0, 0, 0, 1, 1, 2];
  */
 export interface RewardCard { id: string; name: string; desc: string; amount: readonly [number, number, number]; weight: number }
 
-const CN = ['', '一', '二', '三'];
+const CN: Record<number, string> = { 1: '一', 1.5: '一成半', 2: '二', 3: '三' };
 export const REWARD_CARDS: readonly RewardCard[] = [
-  { id: 'RW01', name: '雁過拔毛', desc: '每個對手交給你 {n} 張卡片和 {n} 個道具', amount: [1, 2, 3], weight: 3 },
-  { id: 'RW02', name: '圈地為王', desc: '每個對手交給你 {n} 塊地，連房子一起', amount: [1, 2, 3], weight: 1 },
-  { id: 'RW03', name: '紅包拿來', desc: '每個對手給你 {m}', amount: [5000, 10000, 20000], weight: 4 },
-  { id: 'RW04', name: '抽成', desc: '每個對手交出現金的{c}成給你', amount: [1, 2, 3], weight: 4 },
-  { id: 'RW05', name: '挪用存款', desc: '每個對手存款的{c}成轉進你的存款', amount: [1, 2, 3], weight: 4 },
-  { id: 'RW06', name: '點數上繳', desc: '每個對手交給你 {n} 點券', amount: [100, 150, 200], weight: 4 },
-  { id: 'RW07', name: '全員入獄', desc: '其他人都坐牢 {n} 天', amount: [5, 7, 9], weight: 2 },
-  { id: 'RW08', name: '全員住院', desc: '其他人都住院 {n} 天', amount: [5, 7, 9], weight: 2 },
-  { id: 'RW09', name: '全員冬眠', desc: '其他人冬眠 {n} 回合', amount: [5, 7, 9], weight: 2 },
-  { id: 'RW10', name: '拆遷令', desc: '每個對手隨機 {n} 棟房子拆到底，你隨機 {n} 塊地各加蓋三層', amount: [1, 2, 3], weight: 1 },
+  { id: 'RW01', name: '雁過拔毛', desc: '每個對手交給你 {n} 張卡片和 {n} 個道具', amount: [1, 2, 2], weight: 3 },
+  { id: 'RW02', name: '圈地為王', desc: '每個對手交給你 {n} 塊地，連房子一起（至少保留 1 塊）', amount: [1, 1, 2], weight: 1 },
+  { id: 'RW03', name: '紅包拿來', desc: '每個對手給你 {m}', amount: [5000, 10000, 15000], weight: 4 },
+  { id: 'RW04', name: '抽成', desc: '每個對手交出現金的{c}給你', amount: [1, 1.5, 2], weight: 4 },
+  { id: 'RW05', name: '挪用存款', desc: '每個對手存款的{c}轉進你的存款', amount: [1, 1.5, 2], weight: 4 },
+  { id: 'RW06', name: '點數上繳', desc: '每個對手交給你 {n} 點券', amount: [80, 120, 160], weight: 4 },
+  { id: 'RW07', name: '全員入獄', desc: '其他人都坐牢 {n} 天', amount: [3, 5, 6], weight: 2 },
+  { id: 'RW08', name: '全員住院', desc: '其他人都住院 {n} 天', amount: [3, 5, 6], weight: 2 },
+  { id: 'RW09', name: '全員冬眠', desc: '其他人冬眠 {n} 回合', amount: [3, 5, 6], weight: 2 },
+  { id: 'RW10', name: '拆遷令', desc: '每個對手隨機 {n} 棟房子拆到底，你隨機 {n} 塊地各加蓋三層', amount: [1, 1, 2], weight: 1 },
 ];
 export const rewardById = new Map(REWARD_CARDS.map(c => [c.id, c]));
 
 /** The card's text in this game and grade (紅包拿來's sum × today's price index). */
 export function rewardDesc(g: Game, c: RewardCard, grade: Grade = 0): string {
   const n = c.amount[grade], m = n * g.priceIndex;
-  return c.desc.replaceAll('{n}', String(n)).replace('{c}', CN[n] ?? String(n))
+  const pct = n === 1.5 ? '一成半' : `${CN[n] ?? String(n)}成`;
+  return c.desc.replaceAll('{n}', String(n)).replace('{c}', pct)
     .replace('{m}', m >= 10000 ? `${+(m / 10000).toFixed(1)} 萬元` : `${m.toLocaleString()} 元`);
 }
 
@@ -98,9 +99,11 @@ export function* playReward(g: Game, p: Player, seq: number, test?: string, test
       lines.push({ p: q.id, text: got.length ? `交出${got.join('、')}` : '沒有卡片和道具' });
       if (g.over) return;
     } break;
-    case 'RW02': for (const q of rivals) { // n lots each, the buildings with them
-      const lots = some(g.board.lands.filter(l => l.owner === q.id + 1), n, rnd);
-      if (!lots.length) { lines.push({ p: q.id, text: '沒有地可交' }); continue; }
+    case 'RW02': for (const q of rivals) { // n lots each (preserving at least 1 lot), the buildings with them
+      const owned = g.board.lands.filter(l => l.owner === q.id + 1);
+      const take = Math.min(n, Math.max(0, owned.length - 1));
+      const lots = some(owned, take, rnd);
+      if (!lots.length) { lines.push({ p: q.id, text: owned.length ? '僅餘 1 塊地，受保護保留' : '沒有地可交' }); continue; }
       for (const l of lots) { l.owner = p.id + 1; refs.push(l.id + 2000); }
       lines.push({ p: q.id, text: `交出${lots.map(l => `${l.name}${l.level && !l.chain ? `（${l.level} 層）` : ''}`).join('、')}` });
     } yield { t: 'board' }; break;

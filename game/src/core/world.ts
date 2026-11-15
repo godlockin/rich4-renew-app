@@ -457,6 +457,40 @@ export class World implements WorldHooks {
   }
 
   /**
+   * 五城即時態勢總覽（供局勢面板與跨城決策參考，破除後台城市視野割裂）。
+   */
+  worldSituation(): {
+    index: number;
+    mapId: number;
+    name: string;
+    landIndex: number;
+    playersCount: number;
+    overlordId: number | null;
+    freeLots: number;
+    totalLots: number;
+    resortBonus: number;
+  }[] {
+    return this.cities.map((c, i) => {
+      const mapId = this.mapId(i);
+      const playersCount = this.players.filter(q => !q.bankrupt && q.map === i && !q.trip).length;
+      const ol = this.overlordOf(i);
+      const overlordId = ol >= 0 ? ol : null;
+      const freeLots = c.board.lands.filter(l => l.owner === 0).length;
+      return {
+        index: i,
+        mapId,
+        name: CITY_NAMES[mapId] ?? '',
+        landIndex: LAND_INDEX[mapId] ?? 1,
+        playersCount,
+        overlordId,
+        freeLots,
+        totalLots: c.board.lands.length,
+        resortBonus: resortRate(mapId, this.date),
+      };
+    });
+  }
+
+  /**
    * A station / airport square (17 §3): the human chooses in the travel dialog, a computer by its prospects (17 §3.4).
    * A trip pays the fare, sends the attached god and a carried bomb away, takes the player off the map, and costs
    * the next turn (在路上); then the player starts from the destination's square of the same kind.

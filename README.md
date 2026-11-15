@@ -26,11 +26,27 @@
 下载：[最新版安装包](https://github.com/iam567/rich4-renew-app/releases/latest)（安卓 APK、iPhone IPA、Windows、Mac）
 
 ## 目錄
-- `game/src/core` 規則引擎（回合、地產、股票、卡片、道具、事件、大富豪模式）
-- `game/src/ui` 畫面與動畫
+- `game/src/core` 規則引擎（回合、地產、股票、卡片、道具、事件、大富豪模式、獨立金融模組）
+- `game/src/ui` 畫面與動畫（含 DLC 分包管理、備份匯出與更新驗簽）
 - `game/ios` iOS 工程、`game/android` 安卓工程（Capacitor 7）
-- `game/scripts` 素材連結、打包、安裝到 iPhone
+- `game/scripts` 素材連結、分包打包（`bundle-assets.mjs`）、安裝到 iPhone
+- `tools/party-relay` 派對模式 WebSocket Relay 服務端（房間中繼、公開大廳 `/rooms`、異常上報）
+- `editor/` 開源地圖可視化編輯器（`editor/site/index.html`）與路網審計腳本（`editor/audit.mjs`）
 - `docs/rules` 規則文件
+
+## 進階工具與分包
+```bash
+# 1. 啟動地圖可視化編輯器（在倉庫根目錄執行）
+python3 -m http.server 8080 -d editor/site
+# 審計匯出的地圖 JSON
+node editor/audit.mjs path/to/map.json
+
+# 2. 啟動派對聯機 Relay 服務端（預設 8787 埠，詳見 tools/party-relay/README.md）
+node tools/party-relay/relay.mjs
+
+# 3. 依 DLC 分包打包素材（base / kabukicho / daimillionaire / all）
+node game/scripts/bundle-assets.mjs --pack=all
+```
 
 ## 執行
 ```bash

@@ -173,14 +173,18 @@ describe.skipIf(!have)('大富豪模式 world', () => {
     expect(w.log.some(l => l.text.includes('人太多了'))).toBe(true);
   });
 
-  it('passing a travel square does nothing; only stopping on it offers the trip', () => {
+  it('human passing a travel square is offered the trip (and can cancel); worldSituation summarizes all 5 cities', () => {
     const w = new World(settings(14, 0), boards());
+    const sit = w.worldSituation();
+    expect(sit.length).toBe(5);
+    expect(sit.reduce((s, c) => s + c.playersCount, 0)).toBe(12);
+    expect(sit[4].resortBonus).toBeGreaterThan(1);
     const me = w.players[0], g = w.cities[0];
     me.map = 0; w.landed[0] = true; me.whoPlays = 1;
     const sq = w.travelNodes(0, 'airport')[0], prev = g.node(sq.adjacent.find(Boolean)!);
     me.node = prev.id; me.lastNode = prev.adjacent.find(a => a && a !== sq.id)!;
     w.mask(0);
-    // Two steps: over the airport and on; no question comes.
+    // Two steps: over the airport; human is offered the trip and cancelling (-1) continues without leaving.
     me.turtle = 0; me.dice = 1; me.traffic = 0;
     g.tools.remoteDice = 2;
     const flow = (g as unknown as { depart(p: unknown): Flow }).depart(me);
@@ -191,7 +195,7 @@ describe.skipIf(!have)('大富豪模式 world', () => {
       if (s.t === 'step' && s.to === sq.id && s.left > 0) passed = true;
       r = flow.next();
     }
-    if (passed) expect(asked).toBe(false);
+    if (passed) expect(asked).toBe(true);
     expect(me.trip).toBeUndefined();
   });
 

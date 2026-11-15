@@ -217,4 +217,16 @@ describe.skipIf(!haveMaps)('special financing (02 §8.7)', () => {
     drive(g.bankrupt(p));
     expect(p.specialFinance).toBe(0);
   });
+
+  it('fairFinance (party / explicit): specialFinance does not earn 10% monthly interest', () => {
+    const { g, p } = setup();
+    p.bank = 100_000; p.specialFinance = 60_000; p.loan = 0;
+    // 單機預設維持原版（#13）：全額 10 萬計息 (+10,000)
+    expect(g.finance.interestBase(p)).toBe(100_000);
+    // 開啟 fairFinance（或派對模式）後，扣除 6 萬特別融資，僅 4 萬計息 (+4,000)
+    g.settings.fairFinance = true;
+    expect(g.finance.interestBase(p)).toBe(40_000);
+    drive(g.finance.monthlySettlement());
+    expect(p.bank).toBe(104_000);
+  });
 });

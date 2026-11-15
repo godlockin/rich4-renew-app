@@ -89,16 +89,20 @@ describe.skipIf(!have)('the smarter computer and the computer levels', () => {
     }
   }, 60_000);
 
-  it('地獄 (the user 2026-11-03): the computers gang up on the players — a fellow computer is no rival, the richest player is the leader', () => {
+  it('地獄難度動態威脅權重：優先針對威脅最高的真人，但也遏制滾雪球過大的電腦', () => {
     const g = newGame(1, 7, { party: true, human: true, level: 3 });
     const [h0, h1, c2, c3] = g.players;
     for (const p of g.players) p.whoPlays = p.human ? 1 : 2;
     h0.autopilot = false; h1.autopilot = false;
-    Object.assign(c3, { cash: 9_000_000 }); Object.assign(h1, { cash: 500_000 }); Object.assign(h0, { cash: 100_000 });
+    // h1 資產略低於 c3（50萬 vs 60萬），但在 1.5x 真人威脅加權下（75萬 > 60萬）仍優先鎖定 h1
+    Object.assign(c3, { cash: 600_000, bank: 0 }); Object.assign(h1, { cash: 500_000, bank: 0 }); Object.assign(h0, { cash: 100_000, bank: 0 });
     expect([g.aiLevel(c2), g.aiLevel(h0)]).toEqual([3, 0]);
     const ai = (g as unknown as { smart: { rival(p: unknown, q: unknown): boolean; leader(p: unknown): number } }).smart;
-    expect([ai.rival(c2, h0), ai.rival(c2, h1), ai.rival(c2, c3)]).toEqual([true, true, false]);
-    expect(ai.leader(c2)).toBe(h1.id);                // not the richer computer
+    expect([ai.rival(c2, h0), ai.rival(c2, h1), ai.rival(c2, c3)]).toEqual([true, true, true]);
+    expect(ai.leader(c2)).toBe(h1.id);
+    // 當 c3 資產遠超真人（900萬 > 75萬）時，地獄電腦也會轉頭遏制頭號威脅 c3
+    Object.assign(c3, { cash: 9_000_000 });
+    expect(ai.leader(c2)).toBe(c3.id);
     h1.autopilot = true;                              // a player on 托管 plays 困難, not with the gang
     expect(g.aiLevel(h1)).toBe(2);
   });

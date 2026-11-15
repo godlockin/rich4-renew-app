@@ -143,9 +143,13 @@ describe.skipIf(!existsSync(mapFile(2)))('挑戰模式 switch (task cards and �
     expect(p.cards.length).toBeGreaterThan(cards0);
     expect(p.tools[1]).toBe(Math.min(9, tools0 + 3));
     for (const q of rivals) { expect(q.cards.length).toBe(1); expect(q.tools[1]).toBe(0); }
-    // R02: a lot each
+    // R02: a lot each (preserves last lot when rival only owns 1; takes 1 when rival owns >= 2)
+    rivals.forEach((q, i) => { const l = lots[i * 3 + 2]; l.owner = q.id + 1; l.level = 1; l.chain = false; });
     run('RW02');
-    for (const [i] of rivals.entries()) expect(lots[i * 3].owner).toBe(p.id + 1);
+    for (const q of rivals) expect(lots.filter(l => l.owner === q.id + 1).length).toBe(1);
+    // when rival only has 1 lot left, RW02 protects it
+    run('RW02');
+    for (const q of rivals) expect(lots.filter(l => l.owner === q.id + 1).length).toBe(1);
     // R03 / R04 / R05: money
     let w = p.cash + p.bank;
     run('RW03');
@@ -156,28 +160,28 @@ describe.skipIf(!existsSync(mapFile(2)))('挑戰模式 switch (task cards and �
     const bank0 = p.bank, banks = rivals.map(q => q.bank);
     run('RW05');
     expect(p.bank - bank0).toBe(banks.reduce((a, x) => a + Math.trunc(x * 0.1), 0));
-    // R06: 100 points each
+    // R06: 80 points each (N)
     const pts = p.points;
     run('RW06');
-    expect(p.points - pts).toBe(300);
-    for (const q of rivals) expect(q.points).toBe(50);
+    expect(p.points - pts).toBe(240);
+    for (const q of rivals) expect(q.points).toBe(70);
     // R10: a rival's building down to nothing, three floors for the winner
     rivals.forEach((q, i) => { const l = lots[i * 3 + 1]; l.owner = q.id + 1; l.level = 3; l.chain = false; });
     const mine = lots.filter(l => l.owner === p.id + 1 && l.level < 5).map(l => l.level);
     run('RW10');
     for (const [i] of rivals.entries()) expect(lots[i * 3 + 1].level).toBe(0);
     expect(lots.filter(l => l.owner === p.id + 1 && l.level < 5).map(l => l.level).length).toBeLessThanOrEqual(mine.length);
-    // R09: 冬眠 5
+    // R09: 冬眠 3 (N)
     run('RW09');
-    for (const q of rivals) if (q.placed && !g.offRoad(q)) expect(q.sleep).toBe(5);
-    // R07: prison 5 (a 免罪卡 saves its holder)
+    for (const q of rivals) if (q.placed && !g.offRoad(q)) expect(q.sleep).toBe(3);
+    // R07: prison 3 (a 免罪卡 saves its holder)
     rivals[0].cards = [21];
     run('RW07');
     expect(rivals[0].prison).toBe(0);
     expect(rivals[0].cards).toEqual([]);
-    for (const q of rivals.slice(1)) expect(q.prison & 0x7f).toBe(5);
+    for (const q of rivals.slice(1)) expect(q.prison & 0x7f).toBe(3);
     run('RW08');
-    expect(rivals[0].hospital & 0x7f).toBe(5);
+    expect(rivals[0].hospital & 0x7f).toBe(3);
     expect(REWARD_CARDS.length).toBe(10);
   });
 
@@ -199,7 +203,7 @@ describe.skipIf(!existsSync(mapFile(2)))('挑戰模式 switch (task cards and �
     for (const o of g.players.slice(2)) { o.cards = []; o.tools = o.tools.map(() => 0); }
     q.cards = [8, 2, 6, 7]; q.tools = q.tools.map(() => 0); q.tools[1] = 3; p.cards = []; p.tools[1] = 0;
     drain(playReward(g, p, 0, 'RW01', 2));
-    expect(q.cards.length).toBe(1); expect(q.tools[1]).toBe(0); expect(p.tools[1]).toBe(3);
+    expect(q.cards.length).toBe(2); expect(q.tools[1]).toBe(1); expect(p.tools[1]).toBe(2);
     const w = p.cash + p.bank;
     drain(playReward(g, p, 0, 'RW03', 1));
     expect(p.cash + p.bank - w).toBe(3 * 10000 * g.priceIndex);
@@ -242,7 +246,7 @@ describe.skipIf(!existsSync(mapFile(2)))('挑戰模式 switch (task cards and �
     a.luckFate = 200; b.luckFate = -10; c.cards = [21];
     drain(playReward(g, p, 0, 'RW07', 0));
     expect(a.prison).toBe(0);
-    expect(b.prison & 0x7f).toBe(10);
+    expect(b.prison & 0x7f).toBe(6);
     expect(c.prison).toBe(0); expect(c.cards).toEqual([]);
   });
 

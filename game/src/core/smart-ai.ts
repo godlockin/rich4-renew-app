@@ -57,22 +57,29 @@ export class SmartAi {
   /** 地獄 (Game.aiLevel 3). */
   private hell(p: Player): boolean { return this.g.aiLevel(p) === 3; }
   /**
-   * Whether q is someone p plays against. 地獄 (the user 2026-11-03: the computers that fill the seats all gang up on
-   * the players): only the humans — cards, tools, tolls and the leader count against them, a fellow computer is
-   * never hurt. Fair all the same: nothing hidden is looked at.
+   * 威脅度評估與敵我判定：
+   * 舊版地獄難度會讓電腦對彼此 100% 免疫（1打3 / 1打11 圍毆人類），體驗偏向數值霸凌。
+   * 升級為「動態威脅加權」：電腦之間仍會互相競爭，但地獄難度下會對真人玩家賦予 1.5 倍威脅權重，
+   * 優先壓制領先的真人，同時也會遏制滾雪球過大的其他電腦。
    */
-  rival(p: Player, q: Player): boolean { return q.id !== p.id && (!this.hell(p) || q.human); }
+  rival(p: Player, q: Player): boolean { return q.id !== p.id; }
 
   // ---------------------------------------------------------------- what it knows
 
   money(p: Player): number { return p.cash + p.bank; }
 
-  /** The rival with the most total assets (-1 none), lowest id on ties. */
+  /** 對手威脅度分數（地獄難度對真人加權 1.5 倍）。 */
+  threatScore(p: Player, q: Player): number {
+    const w = this.g.wealth(q);
+    return this.hell(p) && q.human ? w * 1.5 : w;
+  }
+
+  /** The rival with the highest threat score (-1 none), lowest id on ties. */
   leader(p: Player): number {
     let best = -1, w = -Infinity;
     for (const q of this.g.players) {
       if (!this.rival(p, q) || !q.whoPlays) continue;
-      const v = this.g.wealth(q);
+      const v = this.threatScore(p, q);
       if (v > w) { w = v; best = q.id; }
     }
     return best;

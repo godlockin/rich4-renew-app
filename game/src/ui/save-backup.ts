@@ -9,23 +9,26 @@ import { Capacitor } from '@capacitor/core';
 import { gunzipSync, gzipSync, strFromU8, strToU8 } from 'fflate';
 import type { SaveData } from '../core/save';
 import { audio } from './audio';
+import { importCards, loadCards, type Card } from './collection';
 import { AUTO_SLOT, allIds, readSlot, TYCOON_AUTO_SLOT, writeSlot } from './saves';
 
-interface BackupFile { app: 'rich4-saves'; v: 1; version: string; at: number; saves: [number, SaveData][] }
+interface BackupFile { app: 'rich4-saves'; v: 1 | 2; version: string; at: number; saves: [number, SaveData][]; cards?: Record<string, Card> }
 
 const stamp = (t: number) => { const d = new Date(t), z = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`; };
 const when = (t: number) => new Date(t).toLocaleString('zh-Hant', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-/** All saves of this device as a backup file's bytes (null: there are none). */
-export async function backupBytes(): Promise<{ bytes: Uint8Array; count: number } | null> {
+/** All saves and collection cards of this device as a backup file's bytes (null: there are none). */
+export async function backupBytes(): Promise<{ bytes: Uint8Array; count: number; cardsCount: number } | null> {
   const saves: [number, SaveData][] = [];
   for (const id of allIds()) {
     const s = await readSlot(id).catch(() => undefined);
     if (s) saves.push([id, s]);
   }
-  if (!saves.length) return null;
-  const f: BackupFile = { app: 'rich4-saves', v: 1, version: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '', at: Date.now(), saves };
-  return { bytes: gzipSync(strToU8(JSON.stringify(f)), { level: 6 }), count: saves.length };
+  const cards = await loadCards().catch(() => ({} as Record<string, Card>));
+  const cardsCount = Object.keys(cards).length;
+  if (!saves.length && !cardsCount) return null;
+  const f: BackupFile = { app: 'rich4-saves', v: 2, version: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '', at: Date.now(), saves, ...(cardsCount ? { cards } : {}) };
+  return { bytes: gzipSync(strToU8(JSON.stringify(f)), { level: 6 }), count: saves.length, cardsCount };
 }
 
 /** A backup file read back (gzipped or plain JSON); throws with a message for the player when it is not one. */
@@ -37,7 +40,8 @@ export function readBackup(b: Uint8Array): BackupFile {
   const ids = new Set(allIds());
   if (f?.app !== 'rich4-saves' || !Array.isArray(f.saves)) throw new Error('這個檔案不是大富翁4的存檔備份');
   f.saves = f.saves.filter(x => Array.isArray(x) && ids.has(x[0]) && x[1] && typeof x[1] === 'object');
-  if (!f.saves.length) throw new Error('這個備份裡沒有存檔');
+  const hasCards = f.cards && typeof f.cards === 'object' && Object.keys(f.cards).length > 0;
+  if (!f.saves.length && !hasCards) throw new Error('這個備份裡沒有存檔');
   return f;
 }
 
@@ -107,7 +111,8 @@ export async function openBackup(parent: HTMLElement): Promise<void> {
     if (!b) { await sheet(parent, '存檔備份', '目前沒有任何存檔。', ['確定']); return; }
     try {
       const r = await giveFile(b.bytes, `大富翁4存檔-${stamp(Date.now())}.r4save`);
-      if (r === 'downloaded') await sheet(parent, '存檔備份', `已導出 ${b.count} 個存檔（下載的檔案）。`, ['確定']);
+      const extra = b.cardsCount ? `與 ${b.cardsCount} 張圖鑑` : '';
+      if (r === 'downloaded') await sheet(parent, '存檔備份', `已導出 ${b.count} 個存檔${extra}（下載的檔案）。`, ['確定']);
     } catch (e) { await sheet(parent, '存檔備份', `導出沒有完成：${(e as Error).message || '請再試一次'}`, ['確定']); }
     return;
   }
@@ -117,9 +122,13 @@ export async function openBackup(parent: HTMLElement): Promise<void> {
   let f: BackupFile;
   try { f = readBackup(bytes); } catch (e) { await sheet(parent, '導入存檔', (e as Error).message, ['確定']); return; }
   const names = [...new Set(f.saves.map(([id]) => slotName(id)))].join('、');
-  const ok = await sheet(parent, '導入存檔', `這個備份是 ${when(f.at)} 導出的，有 ${f.saves.length} 個存檔（${names}）。\n導入後，這些檔位原本的存檔會被換掉。`, ['導入', '取消']);
+  const cardCount = f.cards ? Object.keys(f.cards).length : 0;
+  const cardNote = cardCount ? `，以及 ${cardCount} 張圖鑑記錄（將合併最高星數）` : '';
+  const ok = await sheet(parent, '導入存檔', `這個備份是 ${when(f.at)} 導出的，有 ${f.saves.length} 個存檔（${names || '無'}）${cardNote}。\n導入後，這些檔位原本的存檔會被換掉。`, ['導入', '取消']);
   if (ok !== 0) return;
   let n = 0;
   for (const [id, s] of f.saves) { try { await writeSlot(id, s); n++; } catch { /* the rest still */ } }
-  await sheet(parent, '導入存檔', n === f.saves.length ? `已導入 ${n} 個存檔，可以到「讀取進度」接著玩。` : `導入了 ${n} / ${f.saves.length} 個存檔，其餘的沒有寫進去，請再試一次。`, ['確定']);
+  const mergedCards = f.cards ? await importCards(f.cards) : 0;
+  const cardDone = mergedCards ? `，並合併了 ${mergedCards} 張圖鑑` : '';
+  await sheet(parent, '導入存檔', n === f.saves.length ? `已導入 ${n} 個存檔${cardDone}，可以到「讀取進度」接著玩。` : `導入了 ${n} / ${f.saves.length} 個存檔${cardDone}，其餘的沒有寫進去，請再試一次。`, ['確定']);
 }

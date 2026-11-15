@@ -8,15 +8,37 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const src = join(root, 'public/assets');
-const out = resolve(process.argv[2] ?? join(root, 'dist/assets'));
+const packArg = process.argv.find(a => a.startsWith('--pack='))?.slice(7);
+const targetPack = process.env.RICH4_PACK || packArg || 'all';
+const positionalOut = process.argv.slice(2).find(a => !a.startsWith('--'));
+const out = resolve(positionalOut ?? join(root, 'dist/assets'));
 let count = 0, bytes = 0;
 
+/** 判斷資源相對路徑所屬分包（base 為主包，其餘為按需 DLC 分包）。 */
+function packOf(rel) {
+  if (/^maps\/remake\/(?:map-10[0-4]\.|10[0-4](?:\/|-)|events\/|onway\/|sprites\/(?:150[1-3]|901[78]|27\d\d|28\d\d|29\d\d|30\d\d|31\d\d)\/)/.test(rel)) return 'tycoon';
+  if (/^maps\/remake\/(?:map-106\.|106(?:\/|-)|kabukicho\/|sprites\/19\d\d\/|tools\/061[78]\.|cards\/060[78]\.)/.test(rel)) return 'kabukicho';
+  if (/^maps\/remake\/(?:map-107\.|107(?:\/|-)|jiqing\/)/.test(rel)) return 'jiqing';
+  if (/^maps\/remake\/(?:map-105\.|105(?:\/|-)|casino\/|sprites\/16\d\d\/)/.test(rel)) return 'finale';
+  if (/^maps\/remake\/challenge\//.test(rel)) return 'challenge';
+  return 'base';
+}
+const include = rel => targetPack === 'all' || packOf(rel) === targetPack;
+const packIndex = { base: [], tycoon: [], kabukicho: [], jiqing: [], finale: [], challenge: [] };
+function recordPack(rel, size) {
+  const p = packOf(rel);
+  (packIndex[p] ??= []).push({ path: rel, size });
+}
+
 function copy(rel) {
+  if (!include(rel)) return;
   const from = join(src, rel), to = join(out, rel);
   if (!existsSync(from)) return;
   mkdirSync(dirname(to), { recursive: true });
   copyFileSync(from, to);
-  count++; bytes += readFileSync(from).length;
+  const sz = statSync(from).size;
+  recordPack(rel, sz);
+  count++; bytes += sz;
 }
 const json = rel => JSON.parse(readFileSync(join(src, rel), 'utf8'));
 
@@ -46,6 +68,7 @@ function shrinkOwn(rel) { const z = fileSize(rel); if (z) shrink(rel, z.w, z.h);
 
 /** A picture to encode smaller (w × h: its full size), or copied as it is when not shrinking. */
 function shrink(rel, w, h) {
+  if (!include(rel)) return;
   if (SHRINK >= 1 || !w || !h) { copy(rel); return; }
   encode.push({ rel, to: rel.replace(/\.png$/, '.webp'), w: Math.max(1, Math.round(w * SHRINK)), h: Math.max(1, Math.round(h * SHRINK)) });
 }
@@ -172,6 +195,7 @@ const UNUSED_DATA = new Set([523]);
 // Original sprites of the archives the game draws from. In the app (RICH4_WEBP=1) as lossless WebP (the same pixels,
 // half the bytes): the manifest names the .webp files and says `ext: 'webp'` for the frames the game names itself
 // (ui/assets.ts origExt).
+if (targetPack === 'all' || targetPack === 'base') {
 copy('orig/outline-colors.json');
 const origManifest = json('orig/manifest.json'), orig = origManifest.archives;
 const origPic = rel => {
@@ -209,6 +233,7 @@ for (const [key, e] of Object.entries(hdManifest.resources)) {
 }
 mkdirSync(join(out, 'hd'), { recursive: true });
 writeFileSync(join(out, 'hd/manifest-hd.json'), JSON.stringify(hdManifest));
+}
 // Sound (scripts/extract_audio.py): every effect, voice and music file the manifest lists.
 if (existsSync(join(src, 'audio/manifest.json'))) {
   copy('audio/manifest.json');
@@ -246,13 +271,21 @@ if (encode.length) {
       const size = j.w && j.h && SHRINK < 1 ? ['-resize', String(j.w), String(j.h)] : [];
       const how = j.lossless ? ['-lossless', '-z', '6', '-exact'] : ['-q', QUALITY, '-alpha_q', '100', '-m', '4', ...size];
       await new Promise((ok, fail) => execFile('cwebp', ['-quiet', ...how, from, '-o', to], err => (err ? fail(err) : ok())));
-      count++; bytes += statSync(to).size;
+      const sz = statSync(to).size;
+      recordPack(j.to, sz);
+      count++; bytes += sz;
       if (++done % 2000 === 0) console.log(`webp ${done}/${encode.length}`);
     }
   }));
 }
 
-console.log(`bundled ${count} files, ${(bytes / 1e6).toFixed(0)} MB → ${out}`);
+mkdirSync(out, { recursive: true });
+const packSummary = Object.fromEntries(
+  Object.entries(packIndex).map(([k, files]) => [k, { count: files.length, bytes: files.reduce((s, f) => s + f.size, 0), files: files.map(f => f.path) }])
+);
+writeFileSync(join(out, 'packs-manifest.json'), JSON.stringify({ pack: targetPack, packs: packSummary }));
+
+console.log(`bundled [${targetPack}] ${count} files, ${(bytes / 1e6).toFixed(0)} MB → ${out}`);
 
 // 在線更新: the build's file list (scripts/update-manifest.mjs), when the build is the app's own dist.
 if (resolve(out) === join(root, 'dist/assets')) {

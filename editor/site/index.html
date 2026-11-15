@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>大富翁4 地圖可視化編輯器</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #121820; color: #e8eef5; display: flex; height: 100vh; overflow: hidden; }
+    aside { width: 370px; background: #1a222d; border-right: 1px solid #2b3646; padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+    h1 { font-size: 16px; margin: 0; color: #ffd166; display: flex; justify-content: space-between; align-items: center; }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+    label { font-size: 11px; color: #9fb0c7; display: block; margin-bottom: 2px; }
+    input, select, button { font-size: 12px; border-radius: 6px; border: 1px solid #334155; background: #0f151d; color: #e8eef5; padding: 5px 7px; }
+    input, select { width: 100%; }
+    input[type="checkbox"] { width: auto; }
+    input[type="range"] { padding: 0; }
+    button { cursor: pointer; background: #2563eb; border-color: #3b82f6; font-weight: 600; white-space: nowrap; }
+    button.ghost { background: #263140; border-color: #3a4759; }
+    button.active { background: #d97706; border-color: #f59e0b; }
+    button.danger { background: #7f1d1d; border-color: #dc2626; }
+    main { flex: 1; position: relative; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+    .card { font-size: 12px; padding: 8px; border-radius: 6px; background: #0f151d; border: 1px solid #2b3646; line-height: 1.45; }
+    .card h2 { font-size: 12px; margin: 0 0 6px; color: #93c5fd; border-bottom: 1px solid #1e293b; padding-bottom: 4px; }
+    .err { color: #f87171; }
+    .warn { color: #fbbf24; }
+    .ok { color: #4ade80; }
+    .hud { position: absolute; right: 12px; bottom: 12px; background: rgba(15,21,29,0.85); border: 1px solid #2b3646; border-radius: 6px; padding: 6px 10px; font-size: 11px; color: #cbd5e1; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>
+      <span>大富翁4 地圖編輯器</span>
+      <span class="row">
+        <button id="btnUndo" class="ghost" title="Ctrl/Cmd+Z">復原</button>
+        <button id="btnRedo" class="ghost" title="Ctrl/Cmd+Y">重做</button>
+      </span>
+    </h1>
+
+    <div class="card">
+      <div class="row">
+        <button id="btnNew" class="ghost">新建空白</button>
+        <button id="btnLoad" class="ghost">載入 JSON</button>
+        <button id="btnBg" class="ghost">載入底圖</button>
+        <button id="btnExport">匯出 JSON</button>
+      </div>
+      <input id="fileIn" type="file" accept=".json" hidden>
+      <input id="bgIn" type="file" accept="image/*" hidden>
+      <div class="row" style="margin-top:6px">
+        <select id="presetSel"><option value="">-- 從 assets 載入內建地圖 --</option></select>
+        <button id="btnLoadPreset" class="ghost">載入</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="modeAdd" class="active" style="flex:1">＋ 新增</button>
+      <button id="modeLink" class="ghost" style="flex:1">🔗 連線</button>
+      <button id="modeSelect" class="ghost" style="flex:1">✎ 編輯/拖曳</button>
+      <button id="btnFit" class="ghost" title="置中畫布">⌖</button>
+    </div>
+
+    <div class="card">
+      <div class="grid3">
+        <div><label>地圖名稱</label><input id="mapName"></div>
+        <div><label>Map ID</label><input id="mapId" type="number"></div>
+        <div><label>尺寸 (px)</label><input id="mapSize" type="number"></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label style="margin:0;white-space:nowrap">底圖透明度</label>
+        <input id="bgAlpha" type="range" min="0" max="100" value="75">
+        <label class="row" style="margin:0;white-space:nowrap"><input id="showLabels" type="checkbox" checked> 標籤</label>
+      </div>
+    </div>
+
+    <div class="card" id="stats">節點：0 | 地產：0 | 設施：0 | 企業：0</div>
+    <div class="card" id="inspector">點擊畫布新增節點，或切換模式選取/拖曳節點。</div>
+    <div class="card" id="auditBox">審計狀態：尚無節點</div>
+  </aside>
+
+  <main>
+    <canvas id="cv"></canvas>
+    <div class="hud" id="hud">滾輪縮放 | 右鍵拖曳平移 | 編輯模式可左鍵拖曳節點 | Ctrl+Z 復原</div>
+  </main>
+
+  <script>
+    const EVENTS = [
+      [0, '空地 / 路過'], [1, '起點 / 地產'], [2, '機會'], [3, '命運'],
+      [4, '樂透 / 特殊'], [5, '商店'], [6, '新聞'], [7, '魔法屋'], [8, '銀行'],
+      [9, '點券 / 贈卡'], [10, '查稅 / 罰款'], [11, '紅利'], [12, '神明'],
+      [13, '特殊格'], [14, 'ATM'], [15, '醫院'], [16, '監獄'],
+      [17, '車站 (大富豪)'], [18, '機場 (大富豪)'],
+    ];
+    const FAC_TYPES = ['0: 公園', '1: 旅馆', '2: 購物中心', '3: 加油站', '4: 研究所'];
+    const big5Decoder = new TextDecoder('big5');
+
+    function parseRawBoard(raw) {
+      const bytesOf = (hex) => {
+        const b = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < b.length; i++) b[i] = parseInt(hex.substr(i * 2, 2), 16);
+        const v = new DataView(b.buffer);
+        return {
+          u8: o => v.getUint8(o), u16: o => v.getUint16(o, true), i16: o => v.getInt16(o, true),
+          u32: o => v.getUint32(o, true), i32: o => v.getInt32(o, true),
+          u16s: (o, n) => Array.from({ length: n }, (_, i) => v.getUint16(o + i * 2, true)),
+          big5: (o, max) => {
+            const sub = b.subarray(o, o + max);
+            const end = sub.indexOf(0);
+            return big5Decoder.decode(sub.subarray(0, end < 0 ? max : end));
+          },
+        };
+      };
+      const nodes = (raw.nodes || []).map(r => {
+        const b = bytesOf(r.raw_hex); const st = b.u32(36);
+        return { id: r.id, x: b.i16(0), y: b.i16(2), adjacent: b.u16s(24, 4), ref: b.u16(32), aux: b.u16(34), event: st & 0xff, oneWay: (st >>> 27) & 0xf, noDrop: (st & 0x80000000) !== 0 };
+      });
+      const lands = (raw.lands || []).map(r => {
+        const b = bytesOf(r.raw_hex);
+        return { id: r.id, x: b.i16(0), y: b.i16(2), name: b.big5(4, 16), tmpState: b.u8(0x17), chain: b.u8(0x18) !== 0, owner: b.u8(0x19), level: b.u8(0x1a), facing: b.u8(0x1b), price: b.u16(0x1c), perLevel: b.u16(0x1e), tolls: b.u16s(0x20, 6), lastToll: b.u32(0x2c), expire: b.u32(0x30) };
+      });
+      const facilities = (raw.facilities || []).map(r => {
+        const b = bytesOf(r.raw_hex);
+        return { id: r.id, x: b.i16(0), y: b.i16(2), name: b.big5(4, 16), type: b.u8(0x18), owner: b.u8(0x19), level: b.u8(0x1a), tmpState: b.u8(0x1c), labTool: b.u8(0x1d), labDays: b.u8(0x1e), price: b.u16(0x22), fees: b.u16s(0x24, 6), lastFee: b.u32(0x30), expire: b.u32(0x34) };
+      });
+      const companies = (raw.companies || []).map(r => {
+        const b = bytesOf(r.raw_hex);
+        return { id: r.id, x: b.i16(0), y: b.i16(2), name: b.big5(4, 16), controller: b.u8(0x18), stockSlot: b.u8(0x19), category: b.u8(0x1a), facing: b.u8(0x1b), resource: b.u16(0x20), baseFee: b.u16(0x22), value: b.i32(0x24), fundA: b.i32(0x28), fundB: b.i32(0x2c), freeShares: b.i32(0x30) };
+      });
+      const landscapes = (raw.landscapes || []).map(r => {
+        const b = bytesOf(r.raw_hex);
+        return { id: r.id, x: b.i16(0), y: b.i16(2), name: b.big5(4, 16), facing: b.u16(0x18), resource: b.u16(0x1a) };
+      });
+      const out = { name: raw.name || `Map ${raw.map_id}`, mapId: raw.map_id ?? 0, size: raw.width ?? 2304, nodes, lands, facilities, companies, landscapes };
+      if (raw.stock_names?.length === 12) out.stockNames = [...raw.stock_names];
+      return out;
+    }
+
+    const emptyBoard = () => ({ name: '自製地圖', mapId: 200, size: 2304, nodes: [], lands: [], facilities: [], companies: [], landscapes: [] });
+    let board = emptyBoard();
+    let mode = 'add', selected = null, linkFrom = null, bgImg = null;
+    let cam = { x: 1152, y: 1152, zoom: 0.3 }, panDrag = null, nodeDrag = null;
+    const undoStack = [], redoStack = [];
+
+    function pushHistory() {
+      undoStack.push(JSON.stringify(board));
+      if (undoStack.length > 50) undoStack.shift();
+      redoStack.length = 0;
+    }
+    function applySnapshot(snap) {
+      const selId = selected?.id;
+      board = JSON.parse(snap);
+      selected = selId ? board.nodes.find(n => n.id === selId) || null : null;
+      syncMetaInputs(); renderInspector(); draw();
+    }
+    function undo() { if (!undoStack.length) return; redoStack.push(JSON.stringify(board)); applySnapshot(undoStack.pop()); }
+    function redo() { if (!redoStack.length) return; undoStack.push(JSON.stringify(board)); applySnapshot(redoStack.pop()); }
+
+    const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+    const resize = () => { cv.width = cv.parentElement.clientWidth; cv.height = cv.parentElement.clientHeight; draw(); };
+    window.addEventListener('resize', resize);
+
+    const toWorld = (sx, sy) => ({ x: Math.round((sx - cv.width / 2) / cam.zoom + cam.x), y: Math.round((sy - cv.height / 2) / cam.zoom + cam.y) });
+    const nodeAt = (wx, wy) => board.nodes.find(n => Math.hypot(n.x - wx, n.y - wy) < Math.max(22, 24 / cam.zoom));
+
+    function entityOf(node) {
+      if (!node || !node.ref) return null;
+      if (node.ref >= 2001 && node.ref < 4000) return { kind: 'land', item: board.lands.find(l => l.id === node.ref - 2000) };
+      if (node.ref >= 4001 && node.ref < 6000) return { kind: 'fac', item: board.facilities.find(f => f.id === node.ref - 4000) };
+      if (node.ref >= 6001 && node.ref < 8000) return { kind: 'comp', item: board.companies.find(c => c.id === node.ref - 6000) };
+      return null;
+    }
+
+    function runAudit() {
+      const box = document.getElementById('auditBox');
+      document.getElementById('stats').textContent = `節點：${board.nodes.length} | 地產：${board.lands.length} | 設施：${board.facilities.length} | 企業：${board.companies.length}`;
+      if (!board.nodes.length) { box.innerHTML = '審計狀態：尚無節點'; return; }
+      const map = new Map(board.nodes.map(n => [n.id, n]));
+      const landIds = new Set(board.lands.map(l => l.id));
+      const facIds = new Set(board.facilities.map(f => f.id));
+      const compIds = new Set(board.companies.map(c => c.id));
+      const vis = new Set([board.nodes[0].id]), q = [board.nodes[0].id];
+      while (q.length) {
+        const cur = map.get(q.shift());
+        for (const id of cur.adjacent) if (id && map.has(id) && !vis.has(id)) { vis.add(id); q.push(id); }
+      }
+      const iso = board.nodes.filter(n => !vis.has(n.id)).length;
+      let dead = 0, badRef = 0, badStep = 0;
+      for (const n of board.nodes) {
+        const exits = n.adjacent.filter((id, j) => id && !((n.oneWay || 0) & (8 >> j)));
+        if (exits.length < 2 && n.event !== 15 && n.event !== 16) dead++;
+        for (const id of n.adjacent) {
+          const nb = id ? map.get(id) : null;
+          if (id && !nb) badRef++;
+          if (nb) { const d = Math.hypot(nb.x - n.x, nb.y - n.y); if (d < 20 || d > 450) badStep++; }
+        }
+        const r = n.ref || 0;
+        if ((r >= 2001 && r < 4000 && !landIds.has(r - 2000)) || (r >= 4001 && r < 6000 && !facIds.has(r - 4000)) || (r >= 6001 && r < 8000 && !compIds.has(r - 6000))) badRef++;
+      }
+      const errs = [];
+      if (iso) errs.push(`<span class="err">孤立節點：${iso}</span>`);
+      if (badRef) errs.push(`<span class="err">無效 ref/鄰居：${badRef}</span>`);
+      if (dead) errs.push(`<span class="warn">端點(&lt;2邊)：${dead}</span>`);
+      if (badStep) errs.push(`<span class="warn">步距異常：${badStep}</span>`);
+      box.innerHTML = errs.length ? errs.join(' | ') : `<span class="ok">審計通過（${board.nodes.length} 節點全連通）</span>`;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.save();
+      ctx.translate(cv.width / 2, cv.height / 2);
+      ctx.scale(cam.zoom, cam.zoom);
+      ctx.translate(-cam.x, -cam.y);
+
+      const sz = board.size || 2304;
+      if (bgImg && bgImg.complete) {
+        ctx.globalAlpha = Number(document.getElementById('bgAlpha').value) / 100;
+        ctx.drawImage(bgImg, 0, 0, sz, sz);
+        ctx.globalAlpha = 1;
+      }
+      ctx.strokeStyle = '#475569'; ctx.lineWidth = 4;
+      ctx.strokeRect(0, 0, sz, sz);
+
+      const map = new Map(board.nodes.map(n => [n.id, n]));
+      const showLbl = document.getElementById('showLabels').checked;
+
+      // Edges & one-way indicators
+      for (const n of board.nodes) {
+        n.adjacent.forEach((id, j) => {
+          const nb = id ? map.get(id) : null;
+          if (!nb) return;
+          const blocked = Boolean((n.oneWay || 0) & (8 >> j));
+          ctx.strokeStyle = blocked ? '#ef4444' : '#60a5fa';
+          ctx.lineWidth = blocked ? 3 : 4;
+          ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(nb.x, nb.y); ctx.stroke();
+        });
+      }
+
+      // Linked entities (lands/facilities/companies)
+      for (const n of board.nodes) {
+        const ent = entityOf(n);
+        if (!ent || !ent.item) continue;
+        const it = ent.item;
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(it.x, it.y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = ent.kind === 'land' ? '#eab308' : ent.kind === 'fac' ? '#a855f7' : '#ec4899';
+        ctx.fillRect(it.x - 10, it.y - 10, 20, 20);
+        if (showLbl && it.name) {
+          ctx.fillStyle = '#fef08a'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText(it.name, it.x, it.y - 16);
+        }
+      }
+
+      // Nodes
+      for (const n of board.nodes) {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 18, 0, Math.PI * 2);
+        ctx.fillStyle = n === selected ? '#f59e0b' : n === linkFrom ? '#ec4899' : n.ref ? '#10b981' : n.event ? '#06b6d4' : '#3b82f6';
+        ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = '#0f172a'; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(n.id), n.x, n.y);
+      }
+
+      ctx.restore();
+      runAudit();
+    }
+
+    function renderInspector() {
+      const el = document.getElementById('inspector');
+      if (!selected) { el.innerHTML = '未選取節點（點擊節點可檢視/編輯）'; return; }
+      const n = selected;
+      const ent = entityOf(n);
+      let entHtml = `<div class="row" style="margin-top:6px">
+        <button id="btnBindLand" class="ghost" style="flex:1">＋綁定地產</button>
+        <button id="btnBindFac" class="ghost" style="flex:1">＋綁定設施</button>
+        <button id="btnBindComp" class="ghost" style="flex:1">＋綁定企業</button>
+      </div>`;
+      if (ent && ent.item) {
+        const it = ent.item;
+        if (ent.kind === 'land') {
+          entHtml = `<h2>地產 #${it.id} (ref ${n.ref})</h2>
+            <div class="grid2">
+              <div><label>街區名稱</label><input id="eName" value="${it.name || ''}"></div>
+              <div><label>地價 / 每級造價</label><div class="row"><input id="ePrice" type="number" value="${it.price}"><input id="ePer" type="number" value="${it.perLevel}"></div></div>
+            </div>
+            <label style="margin-top:4px">過路費 (0~5級，逗號分隔)</label>
+            <input id="eTolls" value="${(it.tolls || []).join(',')}">`;
+        } else if (ent.kind === 'fac') {
+          entHtml = `<h2>設施 #${it.id} (ref ${n.ref})</h2>
+            <div class="grid2">
+              <div><label>名稱</label><input id="eName" value="${it.name || ''}"></div>
+              <div><label>類型</label><select id="eFacType">${FAC_TYPES.map((t, i) => `<option value="${i}" ${it.type === i ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+            </div>
+            <div class="grid2" style="margin-top:4px">
+              <div><label>造價</label><input id="ePrice" type="number" value="${it.price}"></div>
+              <div><label>收費 (0~5級)</label><input id="eFees" value="${(it.fees || []).join(',')}"></div>
+            </div>`;
+        } else if (ent.kind === 'comp') {
+          entHtml = `<h2>企業 #${it.id} (ref ${n.ref})</h2>
+            <div class="grid2">
+              <div><label>名稱</label><input id="eName" value="${it.name || ''}"></div>
+              <div><label>股票槽 / 基礎費</label><div class="row"><input id="eSlot" type="number" value="${it.stockSlot}"><input id="eBaseFee" type="number" value="${it.baseFee}"></div></div>
+            </div>`;
+        }
+      }
+
+      el.innerHTML = `
+        <h2>節點 #${n.id}</h2>
+        <div class="grid3">
+          <div><label>X</label><input id="nX" type="number" value="${n.x}"></div>
+          <div><label>Y</label><input id="nY" type="number" value="${n.y}"></div>
+          <div><label>ref</label><input id="nRef" type="number" value="${n.ref || 0}"></div>
+        </div>
+        <div class="grid2" style="margin-top:4px">
+          <div><label>事件類型</label><select id="evSel">${EVENTS.map(([v, t]) => `<option value="${v}" ${n.event === v ? 'selected' : ''}>${v}: ${t}</option>`).join('')}</select></div>
+          <div style="display:flex;align-items:end;padding-bottom:4px"><label class="row"><input id="nNoDrop" type="checkbox" ${n.noDrop ? 'checked' : ''}> 禁止隨機放置 (noDrop)</label></div>
+        </div>
+        <label style="margin-top:4px">鄰接槽位 (勾選 = 該方向禁止離開 / 單行道)</label>
+        <div class="grid2">
+          ${[0, 1, 2, 3].map(j => `<div class="row"><input class="adjSlot" data-j="${j}" type="number" value="${n.adjacent[j] || 0}"><label class="row" style="margin:0"><input class="owSlot" data-j="${j}" type="checkbox" ${(n.oneWay & (8 >> j)) ? 'checked' : ''}>禁</label></div>`).join('')}
+        </div>
+        ${entHtml}
+        <div class="row" style="margin-top:8px"><button id="btnDel" class="danger" style="width:100%">刪除此節點</button></div>
+      `;
+
+      const bindNum = (id, fn) => { const x = document.getElementById(id); if (x) x.onchange = e => { pushHistory(); fn(Number(e.target.value)); draw(); }; };
+      bindNum('nX', v => { n.x = v; });
+      bindNum('nY', v => { n.y = v; });
+      bindNum('nRef', v => { n.ref = v; renderInspector(); });
+      bindNum('evSel', v => { n.event = v; });
+      document.getElementById('nNoDrop').onchange = e => { pushHistory(); n.noDrop = e.target.checked; };
+      el.querySelectorAll('.adjSlot').forEach(inp => inp.onchange = e => { pushHistory(); n.adjacent[Number(e.target.dataset.j)] = Number(e.target.value) || 0; draw(); });
+      el.querySelectorAll('.owSlot').forEach(inp => inp.onchange = e => {
+        pushHistory();
+        const mask = 8 >> Number(e.target.dataset.j);
+        n.oneWay = e.target.checked ? (n.oneWay | mask) : (n.oneWay & ~mask);
+        draw();
+      });
+
+      const bindNew = (btnId, list, offset, makeItem, ev) => {
+        const b = document.getElementById(btnId);
+        if (!b) return;
+        b.onclick = () => {
+          pushHistory();
+          const id = list.reduce((m, x) => Math.max(m, x.id), 0) + 1;
+          list.push(makeItem(id, n.x, n.y));
+          n.ref = offset + id; n.event = ev;
+          renderInspector(); draw();
+        };
+      };
+      bindNew('btnBindLand', board.lands, 2000, (id, x, y) => ({ id, x: x + 40, y: y - 40, name: `新地段${id}`, tmpState: 0, chain: false, owner: 0, level: 0, facing: 0, price: 1000, perLevel: 500, tolls: [200, 500, 1200, 2400, 4000, 6000], lastToll: 0, expire: 0 }), 1);
+      bindNew('btnBindFac', board.facilities, 4000, (id, x, y) => ({ id, x: x + 40, y: y - 40, name: `新設施${id}`, type: 0, owner: 0, level: 0, tmpState: 0, labTool: 0, labDays: 0, price: 2000, fees: [300, 600, 1200, 2000, 3200, 5000], lastFee: 0, expire: 0 }), 1);
+      bindNew('btnBindComp', board.companies, 6000, (id, x, y) => ({ id, x: x + 40, y: y - 40, name: `新企業${id}`, controller: 0, stockSlot: 0, category: 0, facing: 0, resource: 0, baseFee: 500, value: 50000, fundA: 0, fundB: 0, freeShares: 1000 }), 1);
+
+      if (ent && ent.item) {
+        const it = ent.item;
+        const eName = document.getElementById('eName');
+        if (eName) eName.onchange = e => { pushHistory(); it.name = e.target.value; draw(); };
+        bindNum('ePrice', v => { it.price = v; });
+        bindNum('ePer', v => { it.perLevel = v; });
+        bindNum('eFacType', v => { it.type = v; });
+        bindNum('eSlot', v => { it.stockSlot = v; });
+        bindNum('eBaseFee', v => { it.baseFee = v; });
+        const eTolls = document.getElementById('eTolls');
+        if (eTolls) eTolls.onchange = e => { pushHistory(); it.tolls = e.target.value.split(',').map(x => Number(x.trim()) || 0).slice(0, 6); };
+        const eFees = document.getElementById('eFees');
+        if (eFees) eFees.onchange = e => { pushHistory(); it.fees = e.target.value.split(',').map(x => Number(x.trim()) || 0).slice(0, 6); };
+      }
+
+      document.getElementById('btnDel').onclick = () => {
+        pushHistory();
+        const id = n.id;
+        board.nodes = board.nodes.filter(x => x.id !== id);
+        for (const x of board.nodes) x.adjacent = x.adjacent.map(a => (a === id ? 0 : a));
+        selected = null; renderInspector(); draw();
+      };
+    }
+
+    function syncMetaInputs() {
+      document.getElementById('mapName').value = board.name || '';
+      document.getElementById('mapId').value = board.mapId ?? 0;
+      document.getElementById('mapSize').value = board.size || 2304;
+    }
+    document.getElementById('mapName').onchange = e => { pushHistory(); board.name = e.target.value; };
+    document.getElementById('mapId').onchange = e => { pushHistory(); board.mapId = Number(e.target.value) || 0; };
+    document.getElementById('mapSize').onchange = e => { pushHistory(); board.size = Number(e.target.value) || 2304; draw(); };
+    document.getElementById('bgAlpha').oninput = draw;
+    document.getElementById('showLabels').onchange = draw;
+
+    const setMode = m => {
+      mode = m; linkFrom = null;
+      for (const id of ['modeAdd', 'modeLink', 'modeSelect']) document.getElementById(id).className = id === 'mode' + m[0].toUpperCase() + m.slice(1) ? 'active' : 'ghost';
+      cv.style.cursor = m === 'select' ? 'grab' : 'crosshair';
+      draw();
+    };
+    document.getElementById('modeAdd').onclick = () => setMode('add');
+    document.getElementById('modeLink').onclick = () => setMode('link');
+    document.getElementById('modeSelect').onclick = () => setMode('select');
+    document.getElementById('btnFit').onclick = () => { const s = board.size || 2304; cam = { x: s / 2, y: s / 2, zoom: Math.min(cv.width, cv.height) / (s * 1.1) }; draw(); };
+    document.getElementById('btnUndo').onclick = undo;
+    document.getElementById('btnRedo').onclick = redo;
+    window.addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+    });
+
+    cv.oncontextmenu = e => e.preventDefault();
+    cv.onmousedown = e => {
+      if (e.button === 2) { panDrag = { sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y }; return; }
+      const p = toWorld(e.offsetX, e.offsetY);
+      const hit = nodeAt(p.x, p.y);
+      if (mode === 'add' && !hit) {
+        pushHistory();
+        const nextId = board.nodes.reduce((m, n) => Math.max(m, n.id), 0) + 1;
+        const n = { id: nextId, x: p.x, y: p.y, adjacent: [0, 0, 0, 0], ref: 0, aux: 0, event: 0, oneWay: 0, noDrop: false };
+        if (selected) {
+          const i1 = selected.adjacent.indexOf(0), i2 = n.adjacent.indexOf(0);
+          if (i1 >= 0) selected.adjacent[i1] = n.id;
+          if (i2 >= 0) n.adjacent[i2] = selected.id;
+        }
+        board.nodes.push(n); selected = n; renderInspector(); draw();
+      } else if (mode === 'link' && hit) {
+        if (!linkFrom) linkFrom = hit;
+        else if (linkFrom !== hit) {
+          pushHistory();
+          if (!linkFrom.adjacent.includes(hit.id)) { const i = linkFrom.adjacent.indexOf(0); if (i >= 0) linkFrom.adjacent[i] = hit.id; }
+          if (!hit.adjacent.includes(linkFrom.id)) { const j = hit.adjacent.indexOf(0); if (j >= 0) hit.adjacent[j] = linkFrom.id; }
+          linkFrom = null;
+        }
+        draw();
+      } else if (hit) {
+        selected = hit; renderInspector(); draw();
+        if (mode === 'select') { pushHistory(); nodeDrag = { node: hit, moved: false }; }
+      }
+    };
+    cv.onmousemove = e => {
+      if (panDrag) {
+        cam.x = panDrag.cx - (e.clientX - panDrag.sx) / cam.zoom;
+        cam.y = panDrag.cy - (e.clientY - panDrag.sy) / cam.zoom;
+        draw();
+      } else if (nodeDrag) {
+        const p = toWorld(e.offsetX, e.offsetY);
+        nodeDrag.node.x = p.x; nodeDrag.node.y = p.y; nodeDrag.moved = true;
+        renderInspector(); draw();
+      }
+    };
+    window.onmouseup = () => {
+      if (nodeDrag && !nodeDrag.moved) undoStack.pop();
+      panDrag = null; nodeDrag = null;
+    };
+    cv.onwheel = e => {
+      e.preventDefault();
+      const before = toWorld(e.offsetX, e.offsetY);
+      cam.zoom = Math.max(0.08, Math.min(3.0, cam.zoom * (e.deltaY < 0 ? 1.12 : 0.89)));
+      const after = toWorld(e.offsetX, e.offsetY);
+      cam.x += before.x - after.x; cam.y += before.y - after.y;
+      draw();
+    };
+
+    function loadBoardObject(j, imgUrl) {
+      board = j.nodes?.[0]?.raw_hex !== undefined ? parseRawBoard(j) : j;
+      selected = null; linkFrom = null; undoStack.length = 0; redoStack.length = 0;
+      if (imgUrl) { const im = new Image(); im.onload = draw; im.src = imgUrl; bgImg = im; }
+      else bgImg = null;
+      syncMetaInputs();
+      const s = board.size || 2304;
+      cam = { x: s / 2, y: s / 2, zoom: Math.min(cv.width, cv.height) / (s * 1.1) };
+      renderInspector(); draw();
+    }
+
+    document.getElementById('btnNew').onclick = () => { loadBoardObject(emptyBoard(), null); };
+    document.getElementById('btnLoad').onclick = () => document.getElementById('fileIn').click();
+    document.getElementById('fileIn').onchange = async e => {
+      const f = e.target.files?.[0]; if (!f) return;
+      loadBoardObject(JSON.parse(await f.text()), null);
+    };
+    document.getElementById('btnBg').onclick = () => document.getElementById('bgIn').click();
+    document.getElementById('bgIn').onchange = e => {
+      const f = e.target.files?.[0]; if (!f) return;
+      const im = new Image(); im.onload = draw; im.src = URL.createObjectURL(f); bgImg = im;
+    };
+    document.getElementById('btnExport').onclick = () => {
+      const blob = new Blob([JSON.stringify(board, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `map-${board.mapId || 200}.json`; a.click();
+    };
+
+    // Populate preset maps from assets/maps.json when served over HTTP
+    fetch('assets/maps.json').then(r => r.ok ? r.json() : null).then(meta => {
+      if (!meta?.maps) return;
+      const sel = document.getElementById('presetSel');
+      for (const m of meta.maps) {
+        const opt = document.createElement('option');
+        opt.value = JSON.stringify({ data: `assets/${m.data}`, image: `assets/${m.image}` });
+        opt.textContent = `${m.id}: ${m.name} (${m.counts?.nodes || '?'} 節點)`;
+        sel.appendChild(opt);
+      }
+    }).catch(() => {});
+
+    document.getElementById('btnLoadPreset').onclick = async () => {
+      const v = document.getElementById('presetSel').value;
+      if (!v) return;
+      const { data, image } = JSON.parse(v);
+      const j = await fetch(data).then(r => r.json());
+      loadBoardObject(j, image);
+    };
+
+    syncMetaInputs();
+    resize();
+    document.getElementById('btnFit').click();
+  </script>
+</body>
+</html>

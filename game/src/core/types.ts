@@ -34,6 +34,11 @@ export interface GameSettings {
    * loss as ever (bankruptcy). None / 0: off.
    */
   monthTasks?: 0 | 1 | 2 | 3;
+  /**
+   * 公平金融規則：禁止「特別融資」餘額參與月結 10% 銀行計息（修復原版 #13 刷錢漏洞）。
+   * 派對模式預設啟用，單機經典模式預設維持原版相容（可由設定顯式覆蓋）。
+   */
+  fairFinance?: boolean;
 }
 
 export const FUNDS = [300000, 200000, 100000, 50000, 30000, 10000];
