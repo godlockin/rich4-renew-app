@@ -6,6 +6,7 @@ import { Capacitor } from '@capacitor/core';
 import { CHARACTERS, playerName } from '../core/characters';
 import { format, today } from '../core/date';
 import { Game, SPEED } from '../core/game';
+import { computeStateHash } from '../core/state-hash';
 import { nodeById } from '../core/board';
 import { loadGame, reshuffleGame, saveGame, type SaveData } from '../core/save';
 import type { Answer, GameSettings } from '../core/types';
@@ -1288,8 +1289,9 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
   };
   const dropped = new Map<number, number>();
   const digest = () => {
-    let h = game.rng.seed >>> 0;
-    for (const p of game.players) for (const v of [p.cash, p.bank, p.node, p.points, p.cards.length]) h = (Math.imul(h ^ v, 0x01000193) >>> 0);
+    if (!ty) return computeStateHash(game);
+    let h = 0x811c9dc5;
+    for (const c of ty.world.cities) h = Math.imul(h ^ computeStateHash(c), 0x01000193) >>> 0;
     return h;
   };
   for (;;) {
