@@ -1,4 +1,6 @@
 import type { PackedDate } from './date';
+import type { CasinoGame } from './modules/casino';
+import type { MachineKind } from './modules/kb-machines';
 
 /** New-game settings (docs/rules/01 §2.1). Index fields select from the original option tables. */
 export interface GameSettings {
@@ -206,7 +208,17 @@ export type Ask =
    */
   | { t: 'travel'; p: number; via: 'station' | 'airport'; from: string; options: TravelOption[]; card?: boolean }
   /** Enter an amount; answer: number, or -1 to cancel. */
-  | { t: 'amount'; p: number; title: string; text?: string; min: number; max: number; step: number };
+  | { t: 'amount'; p: number; title: string; text?: string; min: number; max: number; step: number }
+  /** 歌舞伎町 (docs/rules/21 §7.3): 柏青哥／拉霸機. Answer: `{ buys, left, a, b }` (or `{ buys: 0, left: stored }` on timeout). */
+  | { t: 'kb-machine'; p: number; kind: MachineKind; maxBuys: number; seed: number; boost: boolean; stored: number; points: number }
+  /** 歌舞伎町 (docs/rules/21 §7.4): 景品交換所. Answer: `{ tools?: number[]; store?: boolean }`. */
+  | { t: 'kb-exchange'; p: number; kind: MachineKind; left: number; per: number; value: number; sale: boolean; options: { id: number; name: string; price: number; card: boolean; have: number; max: number; stock: number }[] }
+  /** 歌舞伎町 (docs/rules/21 §7.5): 確變卡骰子擇留. Answer: kept indices `number[]`. */
+  | { t: 'kb-dice-keep'; p: number; values: number[]; keep: number }
+  /** 大富翁城賭場 (docs/rules/19 §5): 下注選擇／21點／德州撲克. */
+  | { t: 'casino'; p: number; phase: 'choose'; game: CasinoGame; hall: string; banker: number; facility: number; name: string; level: number; cap: number; min: number; max: number; mult: number; cash: number; fee: number; godLine: string; free: boolean }
+  | { t: 'casino'; p: number; phase: 'blackjack'; player: number[]; up: number; canDouble: boolean; double: number; stake: number }
+  | { t: 'casino'; p: number; phase: 'holdem'; hole: number[]; board: number[]; stake: number; call: number };
 
 /** One destination of the travel dialog: city index, its name, the fare (price-indexed), whether it can be paid. */
 export interface TravelOption { map: number; mapId: number; name: string; price: number; affordable: boolean; owned: number; rivals: number; landIndex?: number }
@@ -227,7 +239,12 @@ export type Answer =
   | { buy: number }
   | { buy: 'card' | 'tool'; index: number }
   | { sell: 'card'; index: number }
-  | { sell: 'tool'; id: number };
+  | { sell: 'tool'; id: number }
+  | { buys?: number; left?: number; a?: number; b?: number; played?: number }
+  | { tools?: number[]; store?: boolean }
+  | number[]
+  | { game: CasinoGame; stake: number; bet?: unknown }
+  | 'hit' | 'stand' | 'double' | 'call' | 'fold';
 
 /** Things that happened, in order, for the screen to show. */
 export type GameEvent =

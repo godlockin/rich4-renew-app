@@ -335,7 +335,7 @@ export class Game {
       const ch = CHARACTERS[s.character];
       const cash = s.human ? Math.trunc(this.fund / 2) : Math.trunc((ch.cashRatio * this.fund) / 100);
       return {
-        id, character: s.character, human: s.human, whoPlays: 0, autopilot: false, bankrupt: false, placed: false,
+        id, character: s.character, human: s.human, whoPlays: s.human ? 1 : 2, autopilot: false, bankrupt: false, placed: false,
         node: 0, lastNode: 0, dir: 0, traffic: settings.traffic, dice: settings.traffic + 1,
         cash, bank: this.fund - cash, loan: 0, specialFinance: 0, loanDue: 0, points: 0,
         hotel: 0, vanish: 0, prison: 0, hospital: 0, sleep: 0, sleepwalk: 0, stay: 0, turtle: 0,
@@ -509,10 +509,13 @@ export class Game {
   randomFreeNode(near?: BoardNode): BoardNode {
     const taken = new Set([...this.players.filter(q => q.placed).map(q => q.node), ...this.objects.slots.filter(o => o.node).map(o => o.node)]);
     const free = this.board.nodes.filter(n => !n.noDrop && !taken.has(n.id) && n.adjacent.some(Boolean));
+    const pool = free.length ? free : this.board.nodes.filter(n => !n.noDrop && n.adjacent.some(Boolean));
+    const list = pool.length ? pool : this.board.nodes.filter(n => n.adjacent.some(Boolean));
+    const candidates = list.length ? list : this.board.nodes;
     // A small map can have no node 300 px away (大富翁城, docs/rules/19): after many misses the last draw is taken
     // (never reached on the original maps, so their rand() sequence is unchanged).
     for (let tries = 0; ; tries++) {
-      const n = free[this.rng.below(free.length)];
+      const n = candidates[this.rng.below(candidates.length)];
       if (!near || Math.abs(n.x - near.x) >= 300 || Math.abs(n.y - near.y) >= 300 || tries >= 2000) return n;
     }
   }
@@ -1580,7 +1583,7 @@ export class Game {
 
   *bankrupt(p: Player): Flow {
     if (this.world) { yield* this.world.hooks.bankrupt(p, this); return; }
-    if (p.bankrupt || !p.placed) return;
+    if (p.bankrupt) return;
     p.whoPlays = 0;
     p.bankrupt = true;
     this.objects.detachAll(p);

@@ -152,7 +152,7 @@ export class Events {
       case 10: case 11: return p.traffic === 1 ? 10 : p.traffic === 2 ? 11 : -1;
       case 12: case 13: return p.traffic === 0 ? 12 : p.traffic === 1 ? 13 : -1;
       case 14: case 15: case 16: return p.traffic === 0 ? 14 : p.traffic === 1 ? 15 : p.traffic === 2 ? 16 : -1;
-      case 33: case 34: case 35: case 36: return g.mapSlot >> 2 === 0 ? t : -1; // game_stage 0 only
+      case 33: case 34: case 35: case 36: return g.board.nodes.some(n => n.ref === 8002 || n.event === 4) ? t : -1;
       default: return t;
     }
   }

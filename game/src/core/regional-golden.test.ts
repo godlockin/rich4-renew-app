@@ -78,7 +78,7 @@ export function goldenRun(mapId: number, days: number): string {
 /** Hashes with the least recently taken way out of every fork (FORK_LRU, 2026-10-23; docs/rules/14 §2). */
 const GOLDEN: Record<number, string> = {
   0: 'cdf777b9fad5995f', 1: '777d5182edc286b4', 2: '56ac88c462d20dac', 3: 'd9058ecdead0124e', 4: '743985bc18297c9a',
-  5: 'ce80a5aa349d547e', 6: 'b886936e16b42112', 7: '65e1bc9a87c31a2a', 100: 'f028b16f64e42b15', 101: '12c583ed6312246b',
+  5: '21d5869281f62c36', 6: 'b886936e16b42112', 7: '65e1bc9a87c31a2a', 100: 'f028b16f64e42b15', 101: '12c583ed6312246b',
   102: 'fb2f53ccc4b0856f', 103: '75eaae1c0554eb79', 104: 'f02caa6f4d357a0b',
 };
 
@@ -88,7 +88,7 @@ const GOLDEN: Record<number, string> = {
  */
 const DOOR: Record<number, string> = {
   0: '97a67828cad8a731', 1: 'b991e6216bfd844c', 2: '2619bcb644c36d24', 3: 'c6613ce9f78f8925', 4: 'ca625138d6bc7d25',
-  5: '7780a6cbf7941d44', 6: '79fb33090daf03b0', 7: '4e55a87a04404326', 100: '080f2b186fcfa504', 101: '2690839886b9a9b9',
+  5: '920b7cd19726f05b', 6: 'd5b9db01b5cfbf92', 7: '4e55a87a04404326', 100: '080f2b186fcfa504', 101: '2690839886b9a9b9',
   102: '6e57556a29412ec0', 103: '3715540a1c34196c', 104: '83bed89b24d5bd5d',
 };
 
@@ -100,7 +100,7 @@ const DOOR: Record<number, string> = {
  */
 const ONE_CARD: Record<number, string> = {
   0: 'e4d97f7dcf97b2a1', 1: '839e37c9749bdfed', 2: '8029ac451da73f4a', 3: '3847d9339f293381', 4: 'dacacfce21273218',
-  5: 'b23b5f88b3913d53', 6: '4717d843c10d42cc', 7: 'fbc0eec86fe619b4', 100: 'cff54e1e7cf1b3a3', 101: '67bd4827025f8489',
+  5: '9ab97843b9bec572', 6: 'e3d442e54bc20cc4', 7: '2b84b5450db142ec', 100: 'cff54e1e7cf1b3a3', 101: '67bd4827025f8489',
   102: 'f6ff562ee131cd4e', 103: '5d85c5989bca43fa', 104: '47f91258b25626f2',
 };
 
@@ -111,7 +111,7 @@ const ONE_CARD: Record<number, string> = {
  */
 const CARD_SUPPLY: Record<number, string> = {
   0: '3ee254372c8f6c42', 1: '9e27482c05e1ecf1', 2: 'c835a5214aa866fb', 3: '9ca87d7996071b2d', 4: 'a999b750a731a053',
-  5: 'b23b5f88b3913d53', 6: '2634aa66c04ebef6', 7: '6a487ce7b1ea11ea', 100: 'cff54e1e7cf1b3a3', 101: '740ca5fbd2abeb5a',
+  5: '169a91fb092b6b5f', 6: '0c15b268d3af14ef', 7: '2b84b5450db142ec', 100: 'cff54e1e7cf1b3a3', 101: '740ca5fbd2abeb5a',
   102: '6e7c3c5ff1d8ca5e', 103: '46fc42cc85c4c9c3', 104: '53cd9bcad31bbfa7',
 };
 
@@ -122,8 +122,8 @@ const CARD_SUPPLY: Record<number, string> = {
  * hashes below (FREE_BUILD), checked by the fifth test.
  */
 const CARD_POOL: Record<number, string> = {
-  0: 'ff64da19cc51dc47', 1: 'f0246854a78ee808', 2: 'e3fcb95c703f1d06', 3: '402fe158a58989ee', 4: '7e01b1cee5d1146e',
-  5: 'd21d73aecf156451', 6: '3c325285a23ded9b', 7: '8f129350179c3558', 100: '4d0f94de316caeff', 101: 'b5bc53d6150f8a55',
+  0: 'ff64da19cc51dc47', 1: 'f0246854a78ee808', 2: 'e3fcb95c703f1d06', 3: '402fe158a58989ee', 4: 'd1352ffb05a7d798',
+  5: '2fe24a07f40a79b4', 6: '216b90a36bdc2441', 7: '8f129350179c3558', 100: '4d0f94de316caeff', 101: 'b5bc53d6150f8a55',
   102: '33d99b88ea6f0bc5', 103: 'fc429a45646aaf27', 104: '2e436d9ef29514b5',
 };
 
@@ -135,8 +135,8 @@ const CARD_POOL: Record<number, string> = {
  * computer's free floors went on an empty large plot (#4005) instead of its level-2 facility.
  */
 const FREE_BUILD: Record<number, string> = {
-  0: 'ff64da19cc51dc47', 1: 'f0246854a78ee808', 2: 'e3fcb95c703f1d06', 3: '3531ca59818d688a', 4: '7e01b1cee5d1146e',
-  5: 'd21d73aecf156451', 6: '3c325285a23ded9b', 7: '8f129350179c3558', 100: '886c4fd637afada1', 101: 'b5bc53d6150f8a55',
+  0: 'ff64da19cc51dc47', 1: 'f0246854a78ee808', 2: 'e3fcb95c703f1d06', 3: '3531ca59818d688a', 4: 'd1352ffb05a7d798',
+  5: '2fe24a07f40a79b4', 6: '216b90a36bdc2441', 7: '8f129350179c3558', 100: '886c4fd637afada1', 101: 'b5bc53d6150f8a55',
   102: '33d99b88ea6f0bc5', 103: 'fc429a45646aaf27', 104: '2e436d9ef29514b5',
 };
 
@@ -147,22 +147,22 @@ const FREE_BUILD: Record<number, string> = {
  * with them off every map gives the fork-rule hashes below (FORKS_ONLY), checked by the seventh test.
  */
 const HOTEL: Record<number, string> = {
-  0: 'ff64da19cc51dc47', 1: 'f0246854a78ee808', 2: 'bda32fecd5e7d8d1', 3: '3531ca59818d688a', 4: '7e01b1cee5d1146e',
-  5: 'd21d73aecf156451', 6: '3c325285a23ded9b', 7: '8f129350179c3558', 100: '85ddb441591645bf', 101: 'e7b047bbe7fc0067',
+  0: 'ff64da19cc51dc47', 1: 'f0246854a78ee808', 2: 'bda32fecd5e7d8d1', 3: '3531ca59818d688a', 4: 'd1352ffb05a7d798',
+  5: '2fe24a07f40a79b4', 6: '216b90a36bdc2441', 7: '8f129350179c3558', 100: '85ddb441591645bf', 101: 'e7b047bbe7fc0067',
   102: 'c21cd9facece35d5', 103: 'fc429a45646aaf27', 104: '2e436d9ef29514b5',
 };
 
 /** The fork-rule hashes of 2026-10-18 before the hotel rules (REMAKE_HOTEL off). */
 const FORKS_ONLY: Record<number, string> = {
-  0: '1ec7b32d388daaf6', 1: 'f0246854a78ee808', 2: 'bda32fecd5e7d8d1', 3: '3531ca59818d688a', 4: '7e01b1cee5d1146e',
-  5: 'd21d73aecf156451', 6: '3c325285a23ded9b', 7: '80b147d1bcc5e179', 100: '85ddb441591645bf', 101: 'e7b047bbe7fc0067',
+  0: '1ec7b32d388daaf6', 1: 'f0246854a78ee808', 2: 'bda32fecd5e7d8d1', 3: '3531ca59818d688a', 4: 'd1352ffb05a7d798',
+  5: '2fe24a07f40a79b4', 6: '216b90a36bdc2441', 7: 'bf4b341c17288d54', 100: '85ddb441591645bf', 101: 'e7b047bbe7fc0067',
   102: '292bc4eba5631a1f', 103: 'c6d0981b302b83fb', 104: '2e436d9ef29514b5',
 };
 
 /** Hashes taken before the regional events existed, with the earlier fork rule (`Forks.legacy`). */
 const LEGACY: Record<number, string> = {
   0: '897efe927eed0cdc', 1: 'f9fc6f63f125f531', 2: '0ced4144f7a073b8', 3: '2fe8ea37cebb1349', 4: '2eb7120b12b7b482',
-  5: 'd86c865fcf563ada', 6: '52dd1728be1481bd', 7: 'b40755b198f271f4', 100: 'f9d23758716ca428', 101: '2910bb8883533e34',
+  5: 'cd813fdf0b514a71', 6: '60e6d796ea766d34', 7: 'a1779a32a7a06257', 100: 'f9d23758716ca428', 101: '2910bb8883533e34',
   102: 'c1539c9b48b6f16e', 103: '3017f90d8f361881', 104: 'ae6f0403ac401dbc',
 };
 
