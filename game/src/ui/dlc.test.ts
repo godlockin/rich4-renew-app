@@ -38,4 +38,13 @@ describe('DLC 分包管理 (ui/dlc.ts)', () => {
     markPackInstalled('jiqing');
     expect(await isPackReady('jiqing', async () => false)).toBe(true);
   });
+
+  it('探針 URL 指向實際存在的分包資源檔名', () => {
+    const probes = Object.fromEntries(DLC_PACKS.map(p => [p.id, p.probe]));
+    expect(probes.tycoon.endsWith('/maps/remake/tokyo.json')).toBe(true);
+    expect(probes.kabukicho.endsWith('/maps/remake/kabukicho.json')).toBe(true);
+    expect(probes.jiqing.endsWith('/maps/remake/jiqing.json')).toBe(true);
+    expect(probes.finale.endsWith('/maps/remake/finale.json')).toBe(true);
+    expect(probes.challenge.endsWith('/maps/remake/challenge/star.webp')).toBe(true);
+  });
 });

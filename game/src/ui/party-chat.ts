@@ -85,6 +85,7 @@ export class PartyBar {
   private tauntAt = 0;
   private tauntTarget = '';
   private hud: NetHud;
+  private timer = 0;
 
   constructor(private stage: HTMLElement, private room: Room, private face: (c: number) => string, private auto: AutoControl) {
     this.el.className = 'party-bar';
@@ -110,7 +111,7 @@ export class PartyBar {
     room.onLobby = () => { this.refresh(); if (this.panel) this.draw(); };
     room.onNet = () => { this.hud.draw(); this.refresh(); };
     this.refresh();
-    window.setInterval(() => this.refresh(), 1000);
+    this.timer = window.setInterval(() => this.refresh(), 1000);
   }
 
   /** The buttons' counts and states. */
@@ -246,5 +247,5 @@ export class PartyBar {
   /** The 延遲 panel is shown (the heads' ping tags go with it). */
   get netShown(): boolean { return this.hud.shown; }
 
-  destroy() { this.el.remove(); this.pops.remove(); this.panel?.remove(); this.hud.destroy(); }
+  destroy() { clearInterval(this.timer); this.el.remove(); this.pops.remove(); this.panel?.remove(); this.hud.destroy(); }
 }

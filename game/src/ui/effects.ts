@@ -590,15 +590,19 @@ export function clipReady(res: number): boolean { return !!clips.get(res)?.bytes
 
 /** Original FLC frames keep the palette's key colour as background: make it transparent. */
 function keyOut(im: ImageBitmap): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = im.width; c.height = im.height;
-  const ctx = c.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(im, 0, 0);
-  const data = ctx.getImageData(0, 0, c.width, c.height), px = data.data;
-  const [r, g, b] = [px[0], px[1], px[2]];
-  for (let i = 0; i < px.length; i += 4) if (px[i] === r && px[i + 1] === g && px[i + 2] === b) px[i + 3] = 0;
-  ctx.putImageData(data, 0, 0);
-  return c;
+  try {
+    const c = document.createElement('canvas');
+    c.width = im.width; c.height = im.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(im, 0, 0);
+    const data = ctx.getImageData(0, 0, c.width, c.height), px = data.data;
+    const [r, g, b] = [px[0], px[1], px[2]];
+    for (let i = 0; i < px.length; i += 4) if (px[i] === r && px[i + 1] === g && px[i + 2] === b) px[i + 3] = 0;
+    ctx.putImageData(data, 0, 0);
+    return c;
+  } finally {
+    im.close();
+  }
 }
 
 /** Breaks a line into pieces at most `max` px wide (CJK text breaks anywhere; '\n' always breaks). */
