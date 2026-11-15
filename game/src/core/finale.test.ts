@@ -502,7 +502,7 @@ describe.skipIf(!have)('大富翁城 in the world (the finale)', () => {
     Object.assign(l.of(1), { lucky: 9, unlucky: 5 });
     const s = chipScore(l, 0, Array.from({ length: 12 }, (_, i) => i));
     const line = (k: string) => s.lines.find(x => x.key === k)!.chips;
-    expect(line('money')).toBe(24);                 // 129,999 元 → 12 × 2
+    expect(line('money')).toBe(60);                 // 129,999 元 → 12 × 5
     expect(line('lands')).toBe(520);
     expect(line('levels')).toBe(28);
     expect(line('facilities')).toBe(90);
@@ -770,5 +770,32 @@ describe.skipIf(!have)('大富翁城 in the world (the finale)', () => {
     expect(w.finale.visits).toBeGreaterThan(0);
     expect(w.cities[5].board.facilities.every(f => !f.level || isHall(f.type))).toBe(true);
     setFinaleBoard(null);
+  });
+});
+
+describe('chipScore 5-city wealth rebalancing (CARD-105)', () => {
+  it('converts cash, unrealized 5-city property, and stock portfolio value fairly at 5 chips / 10,000 元', () => {
+    const l = new Ledger(12);
+    const everyone = Array.from({ length: 12 }, (_, i) => i);
+    // Player 0: cash-heavy (1,000,000 cash+bank, 0 property, 0 stocks)
+    Object.assign(l.of(0), { finalCash: 600_000, finalBank: 400_000 });
+    // Player 1: property-heavy (100,000 cash, 900,000 unrealized property)
+    Object.assign(l.of(1), { finalCash: 100_000, finalBank: 0 });
+    // Player 2: stock-heavy (100,000 cash, 900,000 unrealized stock market value)
+    Object.assign(l.of(2), { finalCash: 100_000, finalBank: 0 });
+
+    const s0 = chipScore(l, 0, everyone, { property: 0, stocks: 0 });
+    const s1 = chipScore(l, 1, everyone, { property: 900_000, stocks: 0 });
+    const s2 = chipScore(l, 2, everyone, { property: 0, stocks: 900_000 });
+
+    expect(s0.total).toBe(500); // 1,000,000 * 5 / 10,000
+    expect(s1.total).toBe(500); // 50 + 450
+    expect(s2.total).toBe(500); // 50 + 450
+    expect(s1.lines.find(x => x.key === 'property')!.chips).toBe(450);
+    expect(s2.lines.find(x => x.key === 'stockValue')!.chips).toBe(450);
+
+    // Negative or missing values clamp cleanly to 0
+    const s3 = chipScore(l, 3, everyone, { property: -50_000, stocks: -20_000 });
+    expect(s3.total).toBe(0);
   });
 });

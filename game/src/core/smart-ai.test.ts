@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { haveSimMaps, simMapFile, simMatch } from './ai-sim';
-import { parseBoard, type RawMap } from './board';
+import { parseBoard, type Board, type RawMap } from './board';
 import { pack } from './date';
-import { Game } from './game';
+import { Game, type WorldHooks } from './game';
 import { loadGame, saveGame } from './save';
 import { SmartAi } from './smart-ai';
-import type { GameSettings } from './types';
+import type { GameSettings, Player } from './types';
 
 /**
  * The smarter computer (core/smart-ai.ts) and the computer's levels (Game.aiLevel): a normal game at its default
@@ -116,4 +116,152 @@ describe.skipIf(!have)('the smarter computer and the computer levels', () => {
       expect(s.aWealth).toBeGreaterThan(s.bWealth);
     }
   }, 120_000);
+});
+
+function miniBoard(): Board {
+  const N = 15;
+  const nodes = [
+    { id: 0, x: 0, y: 0, adjacent: [0, 0, 0, 0], oneWay: 0, dir: 0, ref: 0, event: 0, aux: 0, noDrop: true },
+    ...Array.from({ length: N }, (_, k) => {
+      const id = k + 1;
+      return {
+        id, x: 100 + k * 20, y: 100, adjacent: [id < N ? id + 1 : 1, 0, id > 1 ? id - 1 : N, 0],
+        oneWay: 0, dir: 0, ref: id === 2 ? 2001 : 0, event: 0, aux: 0, noDrop: false,
+      };
+    }),
+  ];
+  const lands = [{
+    id: 1, name: 'TestSt', x: 120, y: 100, price: 2000, perLevel: 1000,
+    tolls: [200, 600, 1400, 3000, 6000, 10000], owner: 1, level: 0, chain: false, shop: 0,
+    tmpState: 0, facing: 0, lastToll: 0, expire: 0,
+  }];
+  return { name: 'Mini', mapId: 0, nodes, lands, facilities: [], companies: [], landscapes: [] };
+}
+
+function miniGame(aiLevel: 0 | 1 | 2 | 3 = 2, hooks?: WorldHooks, rules?: Game['rules']): Game {
+  const settings: GameSettings = {
+    mapId: 0, players: [{ character: 0, human: false }, { character: 1, human: false }],
+    fundIndex: 1, traffic: 0, landLimitIndex: 0, daysLimitIndex: 0, victoryIndex: 0,
+    startDate: pack(2026, 10, 14), seed: 1, aiLevel,
+  };
+  const base = new Game(settings, miniBoard());
+  const g = hooks ? new Game(settings, base.board, { index: 0, hooks, players: base.players }) : base;
+  if (rules) Object.assign(g, { rules });
+  g.animation = false;
+  g.players[0].node = 1; g.players[0].lastNode = 15; g.players[0].placed = true;
+  g.players[1].node = 3; g.players[1].lastNode = 2; g.players[1].placed = true;
+  for (const q of g.players) { q.whoPlays = 2; q.cards = []; q.tools.fill(0); }
+  return g;
+}
+
+describe('SmartAi Daimillionaire cards/tools & Kabukicho rampage (CARD-104)', () => {
+  it('plays Kabukicho KB_RAMPAGE (38) via g.rules.aiPlayCard at aiLevel >= 2', () => {
+    let played = false;
+    const g = miniGame(2, undefined, {
+      ownCards: [38],
+      aiPlayCard: (_game, player, id) => player.id === 0 && id === 38,
+      *playCard(_game, player, id) { if (player.id === 0 && id === 38) { played = true; return true; } return false; },
+    });
+    const p = g.players[0];
+    p.cards = [38];
+    const acts = g.smart.actions(p);
+    expect(acts.length).toBeGreaterThan(0);
+    const flow = acts[0].run();
+    for (let r = flow.next(); !r.done; r = flow.next());
+    expect(played).toBe(true);
+  });
+
+  it('scores and uses Daimillionaire cards 31..36 and 39 when in world mode', () => {
+    const calls: string[] = [];
+    const hooks = {
+      wealth: (q: Player) => q.cash + q.bank,
+      bankrupt: function* () {},
+      travelSquare: function* () { return false; },
+      overflow: function* () { return false; },
+      bankOperators: () => [],
+      cityOf: () => g,
+      humanMarket: function* () {},
+      allCities: () => [g],
+      travelCard: function* (_g: Game, _p: Player, via: string, dest?: number) { calls.push(`travel:${via}:${dest}`); return true; },
+      aiCardTrip: (_g: Game, _p: Player, via: string) => { calls.push(`aiTrip:${via}`); return 1; },
+      deport: function* (_g: Game, victim: Player) { calls.push(`deport:${victim.id}`); return true; },
+      dictateVictims: () => [g.players[1]],
+      dictate: function* () { calls.push('dictate'); },
+      aiDictate: () => true,
+      summonable: () => [g.players[1]],
+      summon: function* () { calls.push('summon'); },
+      aiSummon: () => true,
+      wantedOptions: () => [{ label: 'Rival', value: g.players[1].id, disabled: false }],
+      wanted: function* (_g: Game, _p: Player, q: Player) { calls.push(`wanted:${q.id}`); },
+      wantedUsed: () => {},
+      aiWanted: () => g.players[1].id,
+      icbm: function* () {},
+      aiIcbm: () => -1,
+      spaceTime: function* () {},
+      aiSpaceTime: () => -1,
+    } as unknown as WorldHooks;
+    const g = miniGame(2, hooks);
+    const p = g.players[0], rival = g.players[1];
+    rival.cash = 500_000;
+
+    for (const id of [31, 32, 33, 34, 35, 36] as const) {
+      p.cards = [id];
+      const acts = g.smart.actions(p);
+      expect(acts.length).toBeGreaterThan(0);
+      const fl = acts[0].run();
+      for (let r = fl.next(); !r.done; r = fl.next());
+    }
+    expect(calls).toContain('travel:airport:1');
+    expect(calls).toContain('travel:station:1');
+    expect(calls).toContain(`deport:${rival.id}`);
+    expect(calls).toContain('dictate');
+    expect(calls).toContain('summon');
+    expect(calls).toContain(`wanted:${rival.id}`);
+
+    // 39 複製卡: should score higher than the card it copies and duplicate it
+    p.cards = [39, 34];
+    const best = g.smart.actions(p).sort((a, b) => b.score - a.score)[0];
+    const fl = best.run();
+    for (let r = fl.next(); !r.done; r = fl.next());
+    expect(p.cards.filter(c => c === 34).length).toBe(2);
+    expect(p.cards).not.toContain(39);
+  });
+
+  it('scores and uses Daimillionaire lab tools 14..16 when in world mode', () => {
+    const calls: string[] = [];
+    const hooks = {
+      wealth: (q: Player) => q.cash + q.bank,
+      icbm: function* (_g: Game, _p: Player, city: number, target: number) { calls.push(`icbm:${city}:${target}`); },
+      aiIcbm: () => 10005,
+      spaceTimeCities: () => [{ label: 'City1', value: 1, disabled: false }],
+      spaceTime: function* (_g: Game, _p: Player, city: number) { calls.push(`spaceTime:${city}`); },
+      aiSpaceTime: () => 1,
+    } as unknown as WorldHooks;
+    const g = miniGame(2, hooks);
+    const p = g.players[0];
+
+    // Tool 14: 超級工人 upgrades owned land by +2 levels
+    p.tools[13] = 1;
+    const t14 = g.smart.actions(p);
+    expect(t14.length).toBeGreaterThan(0);
+    for (let fl = t14[0].run(), r = fl.next(); !r.done; r = fl.next());
+    expect(g.board.lands[0].level).toBe(2);
+    expect(p.tools[13]).toBe(0);
+
+    // Tool 15: 洲際飛彈
+    p.tools[14] = 1;
+    const t15 = g.smart.actions(p);
+    expect(t15.length).toBeGreaterThan(0);
+    for (let fl = t15[0].run(), r = fl.next(); !r.done; r = fl.next());
+    expect(calls).toContain('icbm:1:5');
+    expect(p.tools[14]).toBe(0);
+
+    // Tool 16: 時空機
+    p.tools[15] = 1;
+    const t16 = g.smart.actions(p);
+    expect(t16.length).toBeGreaterThan(0);
+    for (let fl = t16[0].run(), r = fl.next(); !r.done; r = fl.next());
+    expect(calls).toContain('spaceTime:1');
+    expect(p.tools[15]).toBe(0);
+  });
 });
