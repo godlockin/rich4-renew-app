@@ -8,6 +8,7 @@ import { CHARACTERS, playerName } from '../core/characters';
 import { day as dayOf, month as monthOf } from '../core/date';
 import type { Game } from '../core/game';
 import { monthlyById, monthlyDesc, MONTHLY_RULE, type MonthlyTask } from '../core/monthly';
+import { getWeeklyPuzzle, type PuzzleDef, type PuzzleEvaluation } from '../core/puzzle';
 import { ASSETS } from './assets';
 import { audio } from './audio';
 import './challenge.css';
@@ -273,4 +274,51 @@ export function starTable(g: Game, winner: number, face: (character: number) => 
         <em>★ ${c.stars(p)}</em><small>完成 ${done}／${c.tasks.length} 個任務</small></li>`;
     }).join('')}</ol>`;
   return root;
+}
+
+/** Formats a puzzle's win condition summary for the 「每週殘局」 card. */
+function puzzleGoalText(p: PuzzleDef): string {
+  const goals: string[] = [];
+  if (p.goal.targetWealth !== undefined) goals.push(`總資產達 ${p.goal.targetWealth.toLocaleString()} 元`);
+  if (p.goal.bankruptAllOpponents) goals.push('讓所有對手破產');
+  return goals.join('且') || '達成殘局目標';
+}
+
+/** Opens the 「每週殘局」 (Weekly Seed Puzzle) card modal over `parent`. */
+export function openWeeklyPuzzle(parent: HTMLElement, onStart: (puzzle: PuzzleDef) => void): void {
+  const puzzle = getWeeklyPuzzle();
+  const overlay = document.createElement('div');
+  overlay.className = 'slots-overlay';
+  const box = document.createElement('div');
+  box.className = 'msg sheet';
+  box.style.maxWidth = '480px';
+  box.innerHTML = `<div class="ribbon">每週殘局</div>
+    <div class="chl" style="text-align:left;padding:4px 6px">
+      <p class="chl-goal" style="font-size:18px;margin-bottom:8px">${esc(puzzle.title)}</p>
+      <p style="margin:0 0 12px;line-height:1.5">${esc(puzzle.description)}</p>
+      <p style="margin:0 0 6px;opacity:.9"><b>目標：</b>${esc(puzzleGoalText(puzzle))}</p>
+      <p style="margin:0 0 12px;opacity:.9"><b>天數限制：</b>${puzzle.maxDays} 天・<b>種子碼：</b>#${puzzle.seed}</p>
+    </div>
+    <div class="choices"><button class="candy ghost" data-close="1">返回</button><button class="candy yes" data-start="1">開始挑戰</button></div>`;
+  overlay.append(box);
+  overlay.onclick = e => {
+    const t = e.target as HTMLElement;
+    if (t.closest('[data-start]')) { audio.ui('yes'); overlay.remove(); onStart(puzzle); return; }
+    if (t === overlay || t.closest('[data-close]')) { audio.ui('no'); overlay.remove(); }
+  };
+  parent.append(overlay);
+}
+
+/** Renders the evaluation summary node for a completed 「每週殘局」 run. */
+export function puzzleResultNode(puzzle: PuzzleDef, ev: PuzzleEvaluation): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'chl';
+  el.style.textAlign = 'left';
+  const badge = ev.status === 'won' ? '挑戰成功！' : '挑戰失敗';
+  el.innerHTML = `<p class="chl-goal" style="font-size:18px;margin-bottom:8px">${badge} ${esc(puzzle.title)}</p>
+    <p style="margin:0 0 8px">${esc(ev.reason)}</p>
+    <p style="margin:0 0 6px">進行天數：${ev.daysElapsed} / ${ev.maxDays} 天</p>
+    <p style="margin:0 0 6px">目前總資產：${ev.playerWealth.toLocaleString()} 元${ev.targetWealth !== undefined ? `（目標 ${ev.targetWealth.toLocaleString()} 元）` : ''}</p>
+    <p style="margin:0">剩餘對手：${ev.opponentsRemaining} 位</p>`;
+  return el;
 }

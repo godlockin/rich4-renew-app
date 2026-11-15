@@ -14,7 +14,7 @@ import { AI_LEVELS, cleanNick, Lobby, myRegion, NICK_MAX, PARTY_CHALLENGE, PARTY
 import { pingText, rowGrade } from './party-hud';
 import { headLine, inParty, lastHeadCount, onHeadCount, type HeadCount } from './party-presence';
 import { setReportName, watchErrors } from './party-report';
-import { RULE_ITEMS, RULE_LABELS } from './rule-options';
+import { EXTRA_RULE_ITEMS, EXTRA_RULE_LABELS, RULE_ITEMS, RULE_LABELS } from './rule-options';
 import { sameVersion, verOf } from './party-version';
 import { inlineChat } from './party-chat';
 import { checkNetwork } from './party-check';
@@ -212,6 +212,9 @@ export function openParty(d: PartyDeps): void {
         ${choiceRow('途中加入', [{ v: 0, text: '關' }, { v: 1, text: '開（可先開始）' }], r.rules.dropIn, host, 'di', r.rules.dropIn ? ' hot on' : ' hot')}
         ${choiceRow('電腦難度', AI_LEVELS.map((text, v) => ({ v, text })), r.rules.aiLevel, host, 'ai')}
         ${Number(r.map) === FINALE_MAP ? '' : choiceRow('挑戰模式', PARTY_CHALLENGE.map((text, v) => ({ v, text })), r.rules.challenge, host, 'ch', r.rules.challenge ? ' hot on' : ' hot')}
+        ${choiceRow(EXTRA_RULE_LABELS.holidays, EXTRA_RULE_ITEMS.holidays.map((text, v) => ({ v, text })), r.rules.holidays ? 1 : 0, host, 'hol')}
+        ${choiceRow(EXTRA_RULE_LABELS.traits, EXTRA_RULE_ITEMS.traits.map((text, v) => ({ v, text })), r.rules.traits ? 1 : 0, host, 'trt')}
+        ${seats.length === 4 ? choiceRow(EXTRA_RULE_LABELS.teams, EXTRA_RULE_ITEMS.teams.map((text, v) => ({ v, text })), r.rules.teams ? 1 : 0, host, 'tm') : ''}
         <p class="pt-wait">${host ? (r.members.length < 2 && !r.rules.dropIn ? '等待朋友加入…' : r.members.length < 2 ? '可以先和電腦開始，朋友之後加入會接手電腦' : `${r.members.length} 位玩家，可以開始了`) : '等待房主開始遊戲…'}</p></div>`;
       const ready = r.members.length >= 2 || !!r.rules.dropIn;
       acts.innerHTML = `<button class="candy ghost" data-a="home">${host ? '解散房間' : '離開房間'}</button>${host ? `<button class="candy yes" data-a="go"${ready ? '' : ' disabled'}>開始遊戲</button>` : ''}`;
@@ -262,6 +265,12 @@ export function openParty(d: PartyDeps): void {
       if (di !== undefined && r.host) { audio.ui('click'); r.setRules({ dropIn: Number(di) }); return; }
       const ch = t.closest<HTMLElement>('[data-ch]')?.dataset.ch;
       if (ch !== undefined && r.host) { audio.ui('click'); r.setRules({ challenge: Number(ch) }); return; }
+      const hol = t.closest<HTMLElement>('[data-hol]')?.dataset.hol;
+      if (hol !== undefined && r.host) { audio.ui('click'); r.setRules({ holidays: Number(hol) }); return; }
+      const trt = t.closest<HTMLElement>('[data-trt]')?.dataset.trt;
+      if (trt !== undefined && r.host) { audio.ui('click'); r.setRules({ traits: Number(trt) }); return; }
+      const tm = t.closest<HTMLElement>('[data-tm]')?.dataset.tm;
+      if (tm !== undefined && r.host) { audio.ui('click'); r.setRules({ teams: Number(tm) }); return; }
       if (k) { if (confirm(`發起請出 ${r.nameOf(k.dataset.kick!)}？需要另外兩位玩家同意`)) { audio.ui('click'); r.vote(k.dataset.kick!); } return; }
       if (f) { audio.ui('click'); fill = Number(f.dataset.fill); render(); return; }
       if (a === 'char') {
