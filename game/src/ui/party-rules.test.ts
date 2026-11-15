@@ -14,7 +14,8 @@ import { pack } from '../core/date';
 import { Game } from '../core/game';
 import { saveGame } from '../core/save';
 import { DAY_LIMITS, FUNDS, LAND_LIMIT_MONTHS, VICTORY_MULTIPLES, type GameSettings } from '../core/types';
-import { cleanRules, DEFAULT_RULES, Room, startMsg, type PartyRules, type StartMsg } from './party-net';
+import { cleanRules, DEFAULT_RULES, Lobby, Room, startMsg, type PartyRules, type RoomInfo, type StartMsg } from './party-net';
+import { netConfig } from './net-peer';
 import { RULE_ITEMS } from './rule-options';
 
 const settle = async (ms = 0) => { for (let k = 0; k < 20; k++) await Promise.resolve(); if (ms) await new Promise(r => setTimeout(r, ms)); for (let k = 0; k < 20; k++) await Promise.resolve(); };
@@ -158,5 +159,68 @@ describe('the rules in a room (mocked PeerJS)', () => {
     const saved = games.map(g => JSON.stringify({ ...saveGame(g), savedAt: 0 }));
     expect(saved[1]).toBe(saved[0]);
     expect(saved[2]).toBe(saved[0]);
+  });
+});
+
+describe('server-backed Lobby', () => {
+  afterEach(() => {
+    netConfig.relays = [];
+    vi.unstubAllGlobals();
+    vi.stubGlobal('window', globalThis);
+  });
+
+  it('publishes, queries, and removes public rooms via relay /rooms when relay is available', async () => {
+    const store = new Map<string, RoomInfo>();
+    const posts: unknown[] = [];
+    netConfig.relays = ['wss://relay.test'];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://relay.test/rooms');
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as RoomInfo & { remove?: string };
+        posts.push(body);
+        if (body.remove) store.delete(body.remove);
+        else if (body.code && !body.private) store.set(body.code, body);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ rooms: [...store.values()] }), { status: 200 });
+    }));
+
+    const mine: RoomInfo = { code: '7788', host: 'p0', character: 0, map: '2', players: 2, max: 8, at: Date.now() };
+    const hostLobby = new Lobby('0.9.0');
+    const seekerLobby = new Lobby('0.9.0');
+    let seen: RoomInfo[] = [];
+    seekerLobby.onRooms = r => { seen = r; };
+
+    await hostLobby.start(mine);
+    await settle(15);
+    await seekerLobby.start(undefined, true);
+    await settle(15);
+
+    expect(store.has('7788')).toBe(true);
+    expect(seen.map(r => r.code)).toEqual(['7788']);
+    expect(seekerLobby.stats.waiting).toBe(3);
+
+    hostLobby.close();
+    await settle(15);
+    expect(store.has('7788')).toBe(false);
+    expect(posts.some(p => (p as { remove?: string }).remove === '7788')).toBe(true);
+    seekerLobby.close();
+  });
+
+  it('falls back to legacy P2P LOBBY when relay /rooms is unavailable', async () => {
+    netConfig.relays = ['wss://relay.test'];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+
+    const l1 = new Lobby('0.9.0');
+    const l2 = new Lobby('0.9.0');
+    const mine: RoomInfo = { code: '9900', host: 'p0', character: 0, map: '2', players: 1, max: 8, at: Date.now() };
+    await l1.start(mine);
+    await settle(20);
+    await l2.start(undefined, true);
+    await settle(20);
+
+    expect([...l2.rooms.values()].map(r => r.code)).toEqual(['9900']);
+    l1.close();
+    l2.close();
   });
 });

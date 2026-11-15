@@ -19,7 +19,7 @@
  * rooms announce themselves again.
  */
 import { FINALE_MAP } from '../core/casino-rules';
-import { freshId, netConfig, openNet, type NetConn, type NetPeer } from './net-peer';
+import { freshId, netConfig, openNet, relays, type NetConn, type NetPeer } from './net-peer';
 import { postChat, reportCtx, reportParty } from './party-report';
 import { CHARACTERS } from '../core/characters';
 import { hostMismatch, partyVersion, refuseGuest, statsByVersion } from './party-version';
@@ -188,7 +188,12 @@ netConfig.peerOpts = PEER_OPTS;
 const open = (id?: string): Promise<NetPeer | null> => openNet(id ?? freshId(PREFIX), !!id);
 const connect = (peer: NetPeer, id: string): Promise<NetConn | null> => peer.dial(id);
 
-/** The 「尋找夥伴」 list: held by whichever phone has the LOBBY id (see the header). */
+async function relayRoomsUrl(): Promise<string | null> {
+  const url = (await relays())[0];
+  return url ? `${url.replace(/^ws/, 'http').replace(/\/+$/, '')}/rooms` : null;
+}
+
+/** The 「尋找夥伴」 list: uses the relay's `/rooms` HTTP endpoint when available, else falls back to the P2P LOBBY peer. */
 export class Lobby {
   rooms = new Map<string, RoomInfo>();
   onRooms: (rooms: RoomInfo[]) => void = () => {};
@@ -199,6 +204,8 @@ export class Lobby {
   private timer = 0;
   private closed = false;
   private mine: RoomInfo | null = null;
+  private publishedCode: string | null = null;
+  private usingRelay = false;
   /** This phone looks at 「尋找夥伴」 (counted as waiting for partners). */
   seeking = false;
   /** Seekers by connection (the holder's bookkeeping), last seen and their version (none: an old phone). */
@@ -219,7 +226,61 @@ export class Lobby {
     this.seeking = seeking;
     void this.loop();
   }
-  announce(room: RoomInfo | null) { this.mine = room; this.push(); }
+  announce(room: RoomInfo | null) {
+    this.mine = room;
+    if (this.usingRelay) void this.pushRelay();
+    else this.push();
+  }
+
+  private async postRoom(url: string, body: Record<string, unknown>, keepalive = false): Promise<boolean> {
+    try {
+      const ctl = new AbortController();
+      const t = keepalive ? 0 : setTimeout(() => ctl.abort(), 5000);
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        ...(keepalive ? { keepalive: true } : { signal: ctl.signal }),
+        cache: 'no-store',
+      });
+      if (t) clearTimeout(t);
+      return r.ok;
+    } catch { return false; }
+  }
+
+  private async syncRelay(url: string): Promise<boolean> {
+    if (this.publishedCode && (!this.mine || this.mine.private || this.mine.code !== this.publishedCode)) {
+      await this.postRoom(url, { remove: this.publishedCode });
+      this.publishedCode = null;
+    }
+    if (this.mine && !this.mine.private) {
+      const ok = await this.postRoom(url, { ...this.mine, ...(this.ver ? { ver: this.ver } : {}), at: Date.now() });
+      if (!ok) return false;
+      this.publishedCode = this.mine.code;
+    }
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 5000);
+      const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
+      clearTimeout(t);
+      if (!r.ok) return false;
+      const j = await r.json() as { rooms?: RoomInfo[] };
+      if (!Array.isArray(j.rooms)) return false;
+      this.rooms = new Map(j.rooms.map(room => [room.code, room]));
+      if (this.mine?.private) this.rooms.set(this.mine.code, { ...this.mine, ...(this.ver ? { ver: this.ver } : {}), at: Date.now() });
+      const rooms = this.list(), stats = this.count(), byVer = this.ver === null ? undefined : this.countByVer();
+      this.onRooms(rooms);
+      const own = this.mineOf(stats, byVer);
+      this.stats = own; this.onStats(own);
+      return true;
+    } catch { return false; }
+  }
+
+  private async pushRelay(): Promise<void> {
+    const url = await relayRoomsUrl();
+    if (!url || this.closed) return;
+    await this.syncRelay(url);
+  }
 
   private all(): RoomInfo[] {
     const now = Date.now();
@@ -262,44 +323,55 @@ export class Lobby {
 
   private async loop() {
     while (!this.closed) {
-      if (!this.holder && !this.toHolder?.open) {
-        // Join the list's holder, else become it.
-        this.peer ??= await open();
-        const c = this.peer && await connect(this.peer, LOBBY);
-        if (c) {
-          this.toHolder = c;
-          c.on('data', d => {
-            const m = d as { t: string; rooms?: RoomInfo[]; stats?: LobbyStats; byVer?: Record<string, LobbyStats> };
-            if (m.t === 'rooms' && m.rooms) { this.rooms = new Map(m.rooms.map(r => [r.code, r])); this.onRooms(this.list()); }
-            if (m.t === 'rooms' && m.stats) { const own = this.mineOf(m.stats, m.byVer); this.stats = own; this.onStats(own); }
-          });
-          c.on('close', () => { this.toHolder = null; });
-        } else {
-          const h = await open(LOBBY);
-          if (h) {
-            this.holder = h;
-            h.on('connection', c2 => {
-              this.conns.add(c2);
-              c2.on('data', d => {
-                const m = d as { t: string; room?: RoomInfo; code?: string; seek?: boolean; ver?: string };
-                if (m.t === 'room' && m.room) this.rooms.set(m.room.code, { ...m.room, at: Date.now() });
-                if (m.t === 'room-off' && m.code) this.rooms.delete(m.code);
-                if (m.t === 'list') { if (m.seek) this.seekers.set(c2, { at: Date.now(), ver: typeof m.ver === 'string' ? m.ver : undefined }); else this.seekers.delete(c2); }
-                this.push();
-              });
-              c2.on('close', () => { this.conns.delete(c2); this.seekers.delete(c2); });
+      const url = await relayRoomsUrl();
+      if (url && await this.syncRelay(url)) {
+        this.usingRelay = true;
+      } else {
+        this.usingRelay = false;
+        if (!this.holder && !this.toHolder?.open) {
+          // Join the list's holder, else become it.
+          this.peer ??= await open();
+          const c = this.peer && await connect(this.peer, LOBBY);
+          if (c) {
+            this.toHolder = c;
+            c.on('data', d => {
+              const m = d as { t: string; rooms?: RoomInfo[]; stats?: LobbyStats; byVer?: Record<string, LobbyStats> };
+              if (m.t === 'rooms' && m.rooms) { this.rooms = new Map(m.rooms.map(r => [r.code, r])); this.onRooms(this.list()); }
+              if (m.t === 'rooms' && m.stats) { const own = this.mineOf(m.stats, m.byVer); this.stats = own; this.onStats(own); }
             });
-            h.on('disconnected', () => { if (!this.closed) h.reconnect(); });
+            c.on('close', () => { this.toHolder = null; });
+          } else {
+            const h = await open(LOBBY);
+            if (h) {
+              this.holder = h;
+              h.on('connection', c2 => {
+                this.conns.add(c2);
+                c2.on('data', d => {
+                  const m = d as { t: string; room?: RoomInfo; code?: string; seek?: boolean; ver?: string };
+                  if (m.t === 'room' && m.room) this.rooms.set(m.room.code, { ...m.room, at: Date.now() });
+                  if (m.t === 'room-off' && m.code) this.rooms.delete(m.code);
+                  if (m.t === 'list') { if (m.seek) this.seekers.set(c2, { at: Date.now(), ver: typeof m.ver === 'string' ? m.ver : undefined }); else this.seekers.delete(c2); }
+                  this.push();
+                });
+                c2.on('close', () => { this.conns.delete(c2); this.seekers.delete(c2); });
+              });
+              h.on('disconnected', () => { if (!this.closed) h.reconnect(); });
+            }
           }
         }
+        this.push();
       }
-      this.push();
       await wait(8000);
     }
   }
 
   close() {
     this.closed = true;
+    if (this.publishedCode) {
+      const code = this.publishedCode;
+      this.publishedCode = null;
+      void relayRoomsUrl().then(url => { if (url) void this.postRoom(url, { remove: code }, true); });
+    }
     if (this.mine && this.toHolder?.open) this.toHolder.send({ t: 'room-off', code: this.mine.code });
     clearTimeout(this.timer);
     this.toHolder?.close();
