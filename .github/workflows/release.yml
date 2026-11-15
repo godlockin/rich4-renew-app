@@ -1,0 +1,245 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: game/package-lock.json
+      - name: Install game dependencies
+        working-directory: game
+        run: npm ci
+      - name: Typecheck
+        working-directory: game
+        run: npx tsc --noEmit
+      - name: Run game unit tests
+        working-directory: game
+        run: npx vitest run
+      - name: Run party-relay tests
+        run: node --test tools/party-relay/relay.test.mjs
+
+  build-web:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: game/package-lock.json
+      - name: Read app version
+        id: meta
+        run: echo "version=$(node -p "require('./game/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Install webp tools
+        run: sudo apt-get update && sudo apt-get install -y webp
+      - name: Install game dependencies
+        working-directory: game
+        run: npm ci
+      - name: Download and verify assets
+        working-directory: game
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download assets -p 'rich4-assets.tar*'
+          shasum -a 256 -c rich4-assets.tar.sha256
+          mkdir -p public
+          tar -xf rich4-assets.tar -C public
+          rm -f rich4-assets.tar rich4-assets.tar.sha256
+      - name: Build web bundle
+        working-directory: game
+        env:
+          RICH4_NO_ASSETS: '1'
+          RICH4_WEBP: '1'
+        run: |
+          npx vite build
+          node scripts/bundle-assets.mjs
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          retention-days: 1
+          path: |
+            game/dist
+            game/public
+
+  android:
+    needs: [verify, build-web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: game/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: Download web build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: game
+      - name: Install game dependencies
+        working-directory: game
+        run: npm ci
+      - name: Build Android APK
+        working-directory: game
+        run: npm run package -- --no-build apk
+      - name: Sign Release APK (if keystore secret is set)
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+          APP_VERSION: ${{ needs.build-web.outputs.version }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > /tmp/release.keystore
+          cd game/android
+          ./gradlew assembleRelease -q
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME/build-tools/"* | sort -V | tail -n 1)
+          "$BUILD_TOOLS/zipalign" -p -f 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            /tmp/aligned.apk
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks /tmp/release.keystore \
+            --ks-pass env:ANDROID_KEYSTORE_PASS \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass env:ANDROID_KEY_PASS \
+            --out "../release/rich4-${APP_VERSION}-release.apk" \
+            /tmp/aligned.apk
+          rm -f /tmp/release.keystore /tmp/aligned.apk
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          retention-days: 1
+          path: game/release/*.apk
+
+  ios:
+    needs: [verify, build-web]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: game/package-lock.json
+      - name: Download web build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: game
+      - name: Install game dependencies
+        working-directory: game
+        run: npm ci
+      - name: Build unsigned iOS IPA
+        working-directory: game
+        run: npm run package -- --no-build ipa
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          retention-days: 1
+          path: game/release/*.ipa
+
+  desktop:
+    needs: [verify, build-web]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: game/desktop/package-lock.json
+      - name: Download web build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: game
+      - name: Install desktop dependencies
+        working-directory: game/desktop
+        run: npm ci
+      - name: Build macOS DMG
+        if: matrix.platform == 'mac'
+        working-directory: game/desktop
+        env:
+          RICH4_DIST: ${{ github.workspace }}/game/dist
+          RICH4_DESKTOP_OUT: ${{ github.workspace }}/game/desktop/out
+          APP_VERSION: ${{ needs.build-web.outputs.version }}
+        run: |
+          npx electron-builder --config electron-builder.config.cjs --mac dir --universal
+          APP_PATH=$(echo out/mac-universal/*.app)
+          codesign --force --deep --sign - "$APP_PATH"
+          mkdir -p out/dmg-stage
+          cp -R "$APP_PATH" out/dmg-stage/
+          ln -s /Applications out/dmg-stage/Applications
+          hdiutil create -volname "Rich4" -srcfolder out/dmg-stage -ov -format UDZO "out/rich4-${APP_VERSION}-mac.dmg"
+      - name: Build Windows ZIP
+        if: matrix.platform == 'win'
+        shell: bash
+        working-directory: game/desktop
+        env:
+          RICH4_DIST: ${{ github.workspace }}/game/dist
+          RICH4_DESKTOP_OUT: ${{ github.workspace }}/game/desktop/out
+          APP_VERSION: ${{ needs.build-web.outputs.version }}
+        run: |
+          npx electron-builder --config electron-builder.config.cjs --win zip --x64
+          node set-win-icon.mjs out/win-unpacked/Rich4.exe build/icon.ico "$APP_VERSION"
+          powershell -NoProfile -Command "Compress-Archive -Path 'out/win-unpacked/*' -DestinationPath \"out/rich4-${APP_VERSION}-win-x64.zip\" -Force"
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          retention-days: 1
+          path: |
+            game/desktop/out/*.dmg
+            game/desktop/out/rich4-*-win-x64.zip
+
+  release:
+    needs: [android, ios, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/*.apk
+            artifacts/*.ipa
+            artifacts/*.dmg
+            artifacts/*.zip
