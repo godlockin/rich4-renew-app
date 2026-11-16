@@ -183,11 +183,37 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: game/desktop/package-lock.json
-      - name: Download web build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: web-build
-          path: game/dist
+      - name: Download & extract assets
+        shell: bash
+        working-directory: game
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download assets -p 'rich4-assets.tar*' || gh release download assets -R iam567/rich4-renew-app -p 'rich4-assets.tar*'
+          node -e '
+            const fs = require("fs"), crypto = require("crypto");
+            const [want] = fs.readFileSync("rich4-assets.tar.sha256", "utf8").trim().split(/\s+/);
+            const h = crypto.createHash("sha256");
+            const s = fs.createReadStream("rich4-assets.tar");
+            s.on("data", c => h.update(c));
+            s.on("end", () => {
+              const got = h.digest("hex");
+              if (got !== want) { console.error("SHA256 mismatch", got, want); process.exit(1); }
+            });
+          '
+          mkdir -p public
+          tar -xf rich4-assets.tar -C public
+          rm -f rich4-assets.tar rich4-assets.tar.sha256
+      - name: Build web bundle for desktop
+        shell: bash
+        working-directory: game
+        env:
+          RICH4_NO_ASSETS: '1'
+          RICH4_WEBP: '1'
+        run: |
+          npm ci
+          npx vite build
+          node scripts/bundle-assets.mjs
       - name: Install desktop dependencies
         working-directory: game/desktop
         run: npm ci
