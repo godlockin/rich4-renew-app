@@ -76,9 +76,7 @@ jobs:
         with:
           name: web-build
           retention-days: 1
-          path: |
-            game/dist
-            game/public
+          path: game/dist
 
   android:
     needs: [verify, build-web]
@@ -95,11 +93,13 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Download web build artifact
         uses: actions/download-artifact@v4
         with:
           name: web-build
-          path: game
+          path: game/dist
       - name: Install game dependencies
         working-directory: game
         run: npm ci
@@ -151,7 +151,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: web-build
-          path: game
+          path: game/dist
       - name: Install game dependencies
         working-directory: game
         run: npm ci
@@ -187,7 +187,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: web-build
-          path: game
+          path: game/dist
       - name: Install desktop dependencies
         working-directory: game/desktop
         run: npm ci
