@@ -24,7 +24,12 @@ const room = (character: number) => { const r = new Room({ name: `p${character}`
 const PICKED: PartyRules = { fundIndex: 3, traffic: 2, landLimitIndex: 4, daysLimitIndex: 2, victoryIndex: 5, challenge: 0, maxPing: 0, turnSec: 2, aiLevel: 3, dropIn: 0 };
 
 beforeAll(() => { vi.stubGlobal('window', globalThis); });
-afterEach(() => { for (const r of open.splice(0)) r.close(); });
+afterEach(() => {
+  for (const r of open.splice(0)) r.close();
+  netConfig.relays = [];
+  vi.unstubAllGlobals();
+  vi.stubGlobal('window', globalThis);
+});
 
 describe('rule values', () => {
   it('the defaults are what every party game started with before', () => {
@@ -210,6 +215,12 @@ describe('server-backed Lobby', () => {
   it('falls back to legacy P2P LOBBY when relay /rooms is unavailable', async () => {
     netConfig.relays = ['wss://relay.test'];
     vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+    vi.stubGlobal('WebSocket', class {
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor() { queueMicrotask(() => { this.onerror?.(); this.onclose?.(); }); }
+      close() {}
+    });
 
     const l1 = new Lobby('0.9.0');
     const l2 = new Lobby('0.9.0');
