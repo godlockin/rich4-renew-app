@@ -204,6 +204,14 @@ jobs:
           mkdir -p public
           tar -xf rich4-assets.tar -C public
           rm -f rich4-assets.tar rich4-assets.tar.sha256
+      - name: Install cwebp
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "win" ]; then
+            choco install webp -y --no-progress
+          else
+            command -v cwebp >/dev/null 2>&1 || brew install webp
+          fi
       - name: Build web bundle for desktop
         shell: bash
         working-directory: game
