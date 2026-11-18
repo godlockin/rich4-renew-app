@@ -293,7 +293,7 @@ export function openWeeklyPuzzle(parent: HTMLElement, onStart: (puzzle: PuzzleDe
   box.className = 'msg sheet';
   box.style.maxWidth = '480px';
   box.innerHTML = `<div class="ribbon">每週殘局</div>
-    <div class="chl" style="text-align:left;padding:4px 6px">
+    <div class="chl chl-puzzle">
       <p class="chl-goal" style="font-size:18px;margin-bottom:8px">${esc(puzzle.title)}</p>
       <p style="margin:0 0 12px;line-height:1.5">${esc(puzzle.description)}</p>
       <p style="margin:0 0 6px;opacity:.9"><b>目標：</b>${esc(puzzleGoalText(puzzle))}</p>
@@ -312,8 +312,7 @@ export function openWeeklyPuzzle(parent: HTMLElement, onStart: (puzzle: PuzzleDe
 /** Renders the evaluation summary node for a completed 「每週殘局」 run. */
 export function puzzleResultNode(puzzle: PuzzleDef, ev: PuzzleEvaluation): HTMLElement {
   const el = document.createElement('div');
-  el.className = 'chl';
-  el.style.textAlign = 'left';
+  el.className = 'chl chl-puzzle';
   const badge = ev.status === 'won' ? '挑戰成功！' : '挑戰失敗';
   el.innerHTML = `<p class="chl-goal" style="font-size:18px;margin-bottom:8px">${badge} ${esc(puzzle.title)}</p>
     <p style="margin:0 0 8px">${esc(ev.reason)}</p>

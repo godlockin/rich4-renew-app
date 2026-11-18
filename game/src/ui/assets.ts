@@ -45,7 +45,7 @@ export async function mapList(): Promise<MapInfo[]> {
     const r = await json<{ maps: { id: number; name: string; thumbnail: string; data: string; image: string; replaces?: number[]; hidden?: boolean }[] }>(`${ASSETS}/maps/remake/index.json`);
     for (const x of r.maps) {
       // `hidden`: a map only 大富豪模式 uses (大富翁城, its finale, docs/rules/19) is known but not offered.
-      list.push({ id: x.id, name: x.name, thumbnail: `${ASSETS}/maps/${x.thumbnail}`, custom: true, kind: 'custom', data: x.data, image: x.image, ...(x.hidden ? { hidden: true } : {}) });
+      list.push({ id: x.id, name: x.name, thumbnail: x.thumbnail ? `${ASSETS}/maps/${x.thumbnail}` : makeMapThumbSvg(x.name), custom: true, kind: 'custom', data: x.data, image: x.image, ...(x.hidden ? { hidden: true } : {}) });
     }
   } catch { /* none installed */ }
   // Maps made in the workshop (editor/export_custom.py, ids from 1000): never offered any more, the 自製地圖 are the
@@ -54,6 +54,9 @@ export async function mapList(): Promise<MapInfo[]> {
     const c = await json<{ maps: { id: number; name: string; thumbnail: string }[] }>(`${ASSETS}/maps/custom/index.json`);
     for (const x of c.maps) list.push({ id: x.id, name: x.name, thumbnail: `${ASSETS}/maps/${x.thumbnail}`, custom: true, kind: 'custom', hidden: true });
   } catch { /* no custom maps exported */ }
+  if (!list.some(m => m.id === 108)) {
+    list.push({ id: 108, name: '直播市區', thumbnail: makeMapThumbSvg('直播市區'), custom: true, kind: 'custom', data: 'remake/live-city.json', image: '' });
+  }
   known = list;
   return list;
 }
@@ -82,14 +85,73 @@ export interface MapArt {
 
 export interface MapDecor { x: number; y: number; res: number }
 
+function makeMapThumbSvg(name: string): string {
+  const safe = name.replace(/[<>&"]/g, '');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b4d89"/><stop offset="1" stop-color="#0e2a4d"/></linearGradient></defs><rect width="320" height="200" fill="url(#g)"/><circle cx="80" cy="70" r="34" fill="#3a8b5c" opacity=".85"/><circle cx="220" cy="115" r="46" fill="#469d6a" opacity=".85"/><path d="M80 70 Q150 40 220 115" stroke="#f5d47a" stroke-width="6" fill="none" stroke-dasharray="10 6"/><text x="160" y="172" text-anchor="middle" fill="#fff" font-family="sans-serif" font-size="22" font-weight="bold">${safe}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/** Generates a clean procedural ground image when a custom or shared map has no raster `.png` asset. */
+export async function buildProceduralGround(board: Board): Promise<HTMLImageElement> {
+  const sz = Math.max(256, board.size || 2304);
+  const w = sz;
+  const h = sz;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, '#1e5b7a');
+    grad.addColorStop(1, '#153b59');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    // Soft island patches around nodes
+    ctx.fillStyle = '#3b7f4f';
+    for (const n of board.nodes) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, 72, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Road beds between connected nodes
+    ctx.strokeStyle = '#d9c8a3';
+    ctx.lineWidth = 34;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const n of board.nodes) {
+      for (const nb of n.adjacent) {
+        if (nb > n.id && board.nodes[nb]) {
+          ctx.moveTo(n.x, n.y);
+          ctx.lineTo(board.nodes[nb].x, board.nodes[nb].y);
+        }
+      }
+    }
+    ctx.stroke();
+  }
+  const img = new Image();
+  img.src = c.toDataURL('image/png');
+  await new Promise<void>(res => { img.onload = () => res(); img.onerror = () => res(); });
+  return img;
+}
+
+/** Builds a playable `MapArt` directly from a decoded `RawMap` (e.g. Map Editor 2.0 share code). */
+export async function buildMapArtFromRaw(raw: RawMap & { sprites?: MapSprites; decorations?: MapDecor[]; step_marks?: boolean; walkers?: [number, number][][] }): Promise<MapArt> {
+  const board = parseBoard(raw);
+  const ground = await buildProceduralGround(board);
+  return { board, ground, sprites: raw.sprites ?? {}, decor: raw.decorations ?? [], stepMarks: !!raw.step_marks,
+    ...(raw.walkers?.length ? { walkers: raw.walkers } : {}) };
+}
+
 export async function loadMap(id: number): Promise<MapArt> {
   let entry = known.find(m => m.id === id);
   if (!entry && id >= 8 && id < 1000) { await mapList().catch(() => []); entry = known.find(m => m.id === id); }
   const base = id >= 1000 ? `${ASSETS}/maps/custom/${id}` : `${ASSETS}/maps/map-${id}`;
   const data = entry?.data ? `${ASSETS}/maps/${entry.data}` : `${base}.json`;
-  const pic = entry?.image ? `${ASSETS}/maps/${entry.image}` : `${base}.png`;
+  const pic = entry && entry.image === '' ? '' : entry?.image ? `${ASSETS}/maps/${entry.image}` : `${base}.png`;
   const raw = await json<RawMap & { sprites?: MapSprites; decorations?: MapDecor[]; step_marks?: boolean; walkers?: [number, number][][] }>(data);
-  return { board: parseBoard(raw), ground: await image(pic), sprites: raw.sprites ?? {}, decor: raw.decorations ?? [], stepMarks: !!raw.step_marks,
+  const board = parseBoard(raw);
+  const ground = pic ? await image(pic).catch(() => buildProceduralGround(board)) : await buildProceduralGround(board);
+  return { board, ground, sprites: raw.sprites ?? {}, decor: raw.decorations ?? [], stepMarks: !!raw.step_marks,
     ...(raw.walkers?.length ? { walkers: raw.walkers } : {}) };
 }
 

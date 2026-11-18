@@ -18,6 +18,7 @@ import { Objects } from './modules/objects';
 import { Places } from './modules/places';
 import { Stocks } from './modules/stocks';
 import { Tools, type ToolDef } from './modules/tools';
+import { executeTrade, type TradeOffer } from './modules/trade';
 import {
   traitBankInterestBonus, traitBuildCost, traitBuyLandCost, traitCardShopRebate,
   traitDividendBonus, traitEventPointsBonus, traitMonthlyAllowance, traitPointsAmount,
@@ -1122,6 +1123,14 @@ export class Game {
         // rich4_ui_sale.asm:5627).
         else if (a.action === 'stock') { yield* this.stocks.humanMarket(p); if (!this.over) yield* this.financeRecall(); }
         else if (a.action === 'trade') { yield* this.blackMarket.humanMarket(p); if (!this.over) yield* this.financeRecall(); }
+        else if (a.action === 'deal') {
+          const offer = (yield ask({ t: 'deal', p: p.id })) as TradeOffer | null | undefined;
+          if (offer && executeTrade(this, offer)) {
+            yield { t: 'say', p: p.id, text: `${playerName(p)} 與 ${playerName(this.players[offer.to])} 達成自由交易！` };
+            yield { t: 'board' };
+            if (!this.over) yield* this.financeRecall();
+          }
+        }
         else if (a.action === 'surrender') { yield* this.surrender(p); return; }
         else if (a.action === 'autopilot') { p.autopilot = true; break; } // 托管: the computer plays from here
         if (this.over || !p.whoPlays) return;

@@ -1529,6 +1529,7 @@ export function autoAnswer(s: Ask): Answer {
         case 'blackjack': return 'stand';
         case 'holdem': return 'fold';
       }
+    case 'deal': return null;
     default: {
       const _exhaustive: never = s;
       return _exhaustive;

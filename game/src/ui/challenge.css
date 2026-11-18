@@ -233,3 +233,5 @@
 .rw-draw.picked .rw-c.pick { opacity: 1; z-index: 3; transform: translate(0, -8%) rotate(0deg) scale(1.6); }
 .rw-draw.picked .rw-c.pick .rw-flip { transform: rotateY(180deg); transition-delay: .25s; }
 .rw-skip { position: absolute; right: 10px; bottom: 8px; font-size: 12px; font-weight: 700; color: #fff; opacity: .85; text-shadow: 0 1px 2px #000; }
+.chl.chl-puzzle { width: 100%; height: auto; max-height: min(62vh, 520px); overflow-y: auto; text-align: left; padding: 4px 6px; color: inherit; }
+.chl.chl-puzzle .chl-goal { text-align: left; white-space: normal; overflow: visible; }

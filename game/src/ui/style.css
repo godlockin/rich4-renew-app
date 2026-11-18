@@ -77,9 +77,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 .toolbar .tb .tb-h { opacity: 0; }
 /* the toolbar's buttons only (大富豪模式's banners are .msg.tb too: their text must show) */
 .toolbar .tb span { display: none; }
+.toolbar .tb[data-key=cheat] { flex: 0 0 auto; width: auto; padding: 2px 9px; margin-left: 4px; border-radius: 999px;
+  background: linear-gradient(#ff6b57, #d92b2b); border: 2px solid #fff3c4; box-shadow: 0 2px 4px rgba(0,0,0,.3); }
+.toolbar .tb[data-key=cheat][hidden] { display: none; }
+.toolbar .tb[data-key=cheat] span { display: inline; color: #fff; font-size: calc(12px * var(--tu)); font-weight: 800; white-space: nowrap; }
+.toolbar .tb[data-key=deal] span { display: block; position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+  padding: 0 4px; border-radius: 6px; background: #2673d6; color: #fff; font-size: 9px; font-weight: 800; line-height: 1.25; white-space: nowrap; }
 .toolbar .tb:hover .tb-n, .toolbar .tb:active .tb-n { opacity: 0; }
 .toolbar .tb:hover .tb-h, .toolbar .tb:active .tb-h { opacity: 1; transform: scale(1.06); }
-.toolbar:not(.turn-open) .tb:is([data-key=save], [data-key=tool], [data-key=card], [data-key=trade], [data-key=stock]) { opacity: 0.45; }
+.toolbar:not(.turn-open) .tb:is([data-key=save], [data-key=tool], [data-key=card], [data-key=trade], [data-key=deal], [data-key=stock]) { opacity: 0.45; }
 
 .view-tools { position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; z-index: 3; }
 .view-tools button { width: 38px; height: 38px; padding: 0; border-radius: 50%; display: grid; place-items: center; color: #5a2d00;

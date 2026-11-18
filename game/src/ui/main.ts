@@ -51,6 +51,12 @@ import { prepareAh11 } from './ah11';
 import { prepareCityLots } from './city-lots';
 import { FINALE_MAP } from '../core/casino-rules';
 import { KB_MAP } from '../core/kabukicho';
+import '../core/live-city'; // registers MAP_RULES[108] (直播市區)
+import { decodeMapShareCode, validateRawMap, type RawMapWithEvents } from '../core/map-schema';
+import { buildMapArtFromRaw } from './assets';
+import { openByoaImportModal } from './byoa-store';
+import { openTradeModal } from './trade-modal';
+import { openCheatModal } from './cheat-modal';
 import { mapAnimMode, prepareKabukicho, setMapAnimMode, STREET_MODES } from './kabukicho'; // 歌舞伎町 (docs/rules/21)
 import { JQ_QUALITIES, jqMusicMode, jqMusicQuality, musicSetFor, setJqMusicMode, setJqMusicQuality } from './jq-music'; // 激情歲月's own music (docs/rules/24 §16)
 import { JQ_MAP, loudspeakerMode, prepareJiqingPlaces, quotesMode, setLoudspeakerMode, setQuotesMode } from './jiqing'; // 激情歲月 (docs/rules/24)
@@ -375,7 +381,7 @@ function options() {
   box.innerHTML = '<div class="ribbon">設定</div>';
   const buttons = document.createElement('div');
   buttons.className = 'choices sys-buttons';
-  buttons.innerHTML = '<button class="candy ghost" data-backup="1">存檔備份</button><button class="candy ghost" data-close="1">關閉</button>';
+  buttons.innerHTML = '<button class="candy ghost" data-byoa="1">自訂素材包</button><button class="candy ghost" data-backup="1">存檔備份</button><button class="candy ghost" data-close="1">關閉</button>';
   box.append(grid, buttons);
   overlay.append(box);
   // Styles redrawn for any map (the choice applies to the maps that have it).
@@ -383,6 +389,7 @@ function options() {
   overlay.onclick = e => {
     const t = e.target as HTMLElement, c = t.closest<HTMLElement>('[data-row]');
     if (c) { audio.ui('click'); current[Number(c.dataset.row)].pick(Number(c.dataset.v)); render(); return; }
+    if (t.closest('[data-byoa]')) { audio.ui('click'); openByoaImportModal(); return; }
     if (t.closest('[data-backup]')) { audio.ui('click'); void openBackup(app); return; } // save-backup.ts
     if (t === overlay || t.closest('[data-close]')) { audio.ui('no'); ro.disconnect(); overlay.remove(); }
   };
@@ -415,6 +422,7 @@ function newGame() {
   };
   const face = (c: number) => b.art('Data', 2, c)?.src ?? '';
   let page = 0;
+  let importedMap: { name: string; raw: RawMapWithEvents } | null = null;
   const PER_PAGE = 8;
   /** Computer seats get random characters other than the human ones. */
   const reroll = () => {
@@ -467,7 +475,8 @@ function newGame() {
       <section class="ng-maps-sec"><div class="ng-head"><h3>地圖</h3><div class="chips">
           <button class="chip${state.kind === 'orig' ? ' on' : ''}" data-maps="orig">原版地圖</button>
           <button class="chip${state.kind === 'custom' ? ' on' : ''}" data-maps="custom">自製地圖 ${maps.filter(m => m.custom && !m.hidden).length}</button>
-          <button class="chip${ty ? ' on' : ''}" data-maps="tycoon">大富豪模式</button></div></div>
+          <button class="chip${ty ? ' on' : ''}" data-maps="tycoon">大富豪模式</button>
+          <button class="chip${importedMap ? ' on' : ''}" data-sharecode="1">${importedMap ? `已匯入：${importedMap.name}` : '匯入分享碼'}</button></div></div>
         ${ty ? `<div class="ng-tycoon">${TYCOON_MAPS.map(id => `<figure><img src="${cityThumb(id)}" alt="" style="--cc:${CITY_COLORS[id]}"><figcaption>${CITY_NAMES[id]}</figcaption></figure>`).join('')}
           <p class="ng-tycoon-note">${phrases('你一人對上其他 11 位角色，大家隨機分散在五座城市。\n搭新幹線、飛機往來各地，讓所有對手破產，就能成為「首富大富豪」。')}</p></div>` : `<div class="ng-maps-wrap"><div class="ng-maps">${shown.map(m => `<button class="ng-map${m.id === state.mapId ? ' on' : ''}" data-map="${m.id}"><img src="${m.thumbnail}" alt=""><span>${m.name}</span></button>`).join('') || '<p class="info-none">沒有可用的地圖</p>'}</div>
           ${pages > 1 ? `<button class="ng-pg prev" data-page="-1"${page === 0 ? ' disabled' : ''} aria-label="上一頁">‹</button><button class="ng-pg next" data-page="1"${page >= pages - 1 ? ' disabled' : ''} aria-label="下一頁">›<small>${page + 1}/${pages}</small></button>` : ''}</div>`}</section>
@@ -526,7 +535,25 @@ function newGame() {
     audio.sfx(d.pick ? 5 : d.go ? 2 : d.back ? 4 : 1);
     if (d.back) { app.querySelector('.ng')?.remove(); window.removeEventListener('resize', fit); title(); return; }
     if (d.page) page = Math.max(0, page + Number(d.page));
-    if (d.maps === 'tycoon') { state.kind = 'tycoon'; render(); return; }
+    if (d.sharecode) {
+      const code = prompt('請貼上地圖編輯器 2.0 分享碼（RICH4MAP1:...）：')?.trim();
+      if (code) {
+        try {
+          const raw = decodeMapShareCode(code);
+          const v = validateRawMap(raw);
+          if (!v.ok) { alert(`地圖驗證失敗：\n${v.errors.slice(0, 5).join('\n')}`); }
+          else {
+            importedMap = { name: raw.name || '分享地圖', raw };
+            state.kind = 'custom';
+            render();
+          }
+        } catch (err) {
+          alert(`分享碼解析失敗：${(err as Error).message}`);
+        }
+      }
+      return;
+    }
+    if (d.maps === 'tycoon') { importedMap = null; state.kind = 'tycoon'; render(); return; }
     if (d.maps === 'challenge') {
       state.kind = 'challenge';
       if (!CHALLENGE_MAPS.includes(state.mapId)) state.mapId = CHALLENGE_MAPS[0];
@@ -537,7 +564,7 @@ function newGame() {
       if (first && !maps.some(m => m.id === state.mapId && m.kind === state.kind && !m.hidden)) state.mapId = first.id;
       page = 0;
     }
-    if (d.map) state.mapId = Number(d.map);
+    if (d.map) { importedMap = null; state.mapId = Number(d.map); }
     if (d.count) { state.count = Number(d.count); reroll(); }
     if (d.reroll) reroll();
     if (d.pick) {
@@ -576,7 +603,7 @@ function newGame() {
       if (!players.some(p => p.human)) players[0].human = true;
       const cm = state.kind === 'challenge';
       start({
-        mapId: state.mapId, players, fundIndex: state.fundIndex, traffic: state.traffic, landLimitIndex: state.landLimitIndex,
+        mapId: importedMap ? 999 : state.mapId, players, fundIndex: state.fundIndex, traffic: state.traffic, landLimitIndex: state.landLimitIndex,
         daysLimitIndex: cm ? 0 : state.daysLimitIndex, victoryIndex: cm ? 0 : state.victoryIndex, startDate: today(), seed: (Math.random() * 2 ** 32) >>> 0,
         ...(cm ? { challenge: true, challengeYears: CHALLENGE_YEARS[state.yearsIndex], challengeMonthly: !!state.monthly } : state.aiLevel ? { aiLevel: state.aiLevel } : {}),
         // 大富翁城 has no 挑戰模式 (the user 2026-11-03).
@@ -584,7 +611,7 @@ function newGame() {
         ...(state.holidays ? { holidays: true } : {}),
         ...(state.traits ? { traits: true } : {}),
         ...(!cm && state.teams && players.length === 4 ? { teams: [1, 1, 2, 2] } : {}),
-      });
+      }, undefined, importedMap?.raw);
       return;
     }
     render();
@@ -600,15 +627,15 @@ let sessionAC: AbortController | null = null;
 let currentView: BoardView | null = null;
 let currentWeather: WeatherFx | null = null;
 
-function start(settings: GameSettings, room?: Room) {
+function start(settings: GameSettings, room?: Room, customMap?: RawMapWithEvents) {
   // 派對模式, back after the app closed (issue #50): the game from the room's newest turn, the answers since follow.
   const back = room?.resume;
   if (back) {
-    begin(settings.mapId, board => { const g = loadGame(JSON.parse(back.save) as SaveData, board); if (!ledgerOf(g.players)) attachLedger(g.players); return g; }, true, undefined, room);
+    begin(settings.mapId, board => { const g = loadGame(JSON.parse(back.save) as SaveData, board); if (!ledgerOf(g.players)) attachLedger(g.players); return g; }, true, undefined, room, undefined, customMap);
     return;
   }
   // Every game keeps the statistics ledger (core/stats.ts) for the results screen.
-  begin(settings.mapId, board => { const g = new Game(settings, board); attachLedger(g.players); return g; }, false, undefined, room);
+  begin(settings.mapId, board => { const g = new Game(settings, board); attachLedger(g.players); return g; }, false, undefined, room, undefined, customMap);
 }
 
 /** Launches a curated Weekly Seed Puzzle (`core/puzzle.ts`). */
@@ -696,7 +723,7 @@ function bootScreen(name: string, thumb: string, what: string, sub = ''): Loadin
 }
 
 /** `room`: 派對模式 (party-net.ts) — the other phones' seats wait for their answers, this phone's answers are sent. */
-async function begin(mapId: number, make: (board: import('../core/board').Board) => Game, loaded: boolean, ty?: { world: World; flow: ReturnType<World['run']> }, room?: Room, puzzle?: PuzzleDef) {
+async function begin(mapId: number, make: (board: import('../core/board').Board) => Game, loaded: boolean, ty?: { world: World; flow: ReturnType<World['run']> }, room?: Room, puzzle?: PuzzleDef, customMap?: RawMapWithEvents) {
   const me = ++session;
   sessionAC?.abort();
   const ac = sessionAC = new AbortController();
@@ -720,11 +747,15 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
   let groundWant = '';
   let firstGround: TiledGround | null = null;
   try {
-    [art, bank, firstGround] = await Promise.all([loadMap(mapId), bank ?? SpriteBank.create(), groundStylesFor(mapId).then(st => {
-      groundStyles = st;
-      groundWant = st.includes(groundStyle()) ? groundStyle() : '';
-      return groundWant ? TiledGround.load(mapId, groundWant) : null;
-    })]);
+    [art, bank, firstGround] = await Promise.all([
+      customMap ? buildMapArtFromRaw(customMap) : loadMap(mapId),
+      bank ?? SpriteBank.create(),
+      customMap ? Promise.resolve(null) : groundStylesFor(mapId).then(st => {
+        groundStyles = st;
+        groundWant = st.includes(groundStyle()) ? groundStyle() : '';
+        return groundWant ? TiledGround.load(mapId, groundWant) : null;
+      }),
+    ]);
     boot.progress(0.12, '載入地圖資料…');
     bank.addMapSprites(art.sprites);
     if (ty) { await registerSprites(bank); installWorldScreens(); }
@@ -752,6 +783,7 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
   setEraLine(null); // a map's own wording of the place screens: only 激情歲月's (below)
   if (mapId === JQ_MAP) applyJqTheme(shell); // 激情歲月's skin and words (docs/rules/24 §3, §11)
   const toolbar = new Toolbar(bank);
+  toolbar.setCheatVisible(!room && !puzzle);
   const stage = document.createElement('section');
   stage.className = 'stage';
   const side = document.createElement('aside');
@@ -891,12 +923,16 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
         if (slot >= 0) void resume(slot, shell);
         return;
       }
-      case 'card': case 'tool': case 'stock': case 'trade':
+      case 'card': case 'tool': case 'stock': case 'trade': case 'deal':
         if (!needTurn()) return;
         if (key === 'stock' && noStocks(game)) { hud.flash(ty ? '大富翁城沒有股市\n（股票進城時已換成現金）' : '大富翁城沒有股市', 1400); return; }
         // The menu is about to open: the clips of what can be used from it start loading now.
         if (key === 'card' || key === 'tool') warmFor(game.players[game.current], key);
         go.cancel(); turn!({ action: key });
+        return;
+      case 'cheat':
+        if (room || puzzle) return;
+        openCheatModal(app, game, () => { view.syncAll(); hud.refresh(); });
         return;
       case 'autopilot': {
         const p = game.players[game.current];
@@ -991,8 +1027,12 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
         });
         render();
         let replayIntro = false;
-        const v = await hud.settingsSheet('系統', grid,
-          [{ label: '投降', kind: 'no', value: 'surrender' }, { label: '回到標題', value: 'title' }]);
+        const v = await hud.settingsSheet('系統', grid, [
+          ...(!room && !puzzle ? [{ label: '作弊模式', value: 'cheat' }] : []),
+          { label: '投降', kind: 'no', value: 'surrender' },
+          { label: '回到標題', value: 'title' },
+        ]);
+        if (v === 'cheat' && !room && !puzzle) { openCheatModal(app, game, () => { view.syncAll(); hud.refresh(); }); return; }
         if (v === 'surrender' && needTurn() && confirm('確定要投降嗎？')) { go.cancel(); turn!({ action: 'surrender' }); }
         if (v === 'title' && confirm('回到標題畫面？（未存檔的進度會遺失）')) location.reload();
         if (replayIntro) await playJqIntro(shell, game, bank!, scale());
@@ -1495,6 +1535,12 @@ async function begin(mapId: number, make: (board: import('../core/board').Board)
         audio.ui(answer !== none ? 'yes' : 'no');
         hint.remove();
         view.followActor(game.current);
+        continue;
+      }
+      if (s.t === 'deal') {
+        wd.setHuman(true);
+        answer = (await timed(openTradeModal(app, game, s.p) as Promise<Answer>, expires(s.p), () => null)) as Answer;
+        wd.setHuman(false);
         continue;
       }
       if (s.t === 'pick-player') {

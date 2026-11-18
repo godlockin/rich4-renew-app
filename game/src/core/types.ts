@@ -229,13 +229,15 @@ export type Ask =
   /** 大富翁城賭場 (docs/rules/19 §5): 下注選擇／21點／德州撲克. */
   | { t: 'casino'; p: number; phase: 'choose'; game: CasinoGame; hall: string; banker: number; facility: number; name: string; level: number; cap: number; min: number; max: number; mult: number; cash: number; fee: number; godLine: string; free: boolean }
   | { t: 'casino'; p: number; phase: 'blackjack'; player: number[]; up: number; canDouble: boolean; double: number; stake: number }
-  | { t: 'casino'; p: number; phase: 'holdem'; hole: number[]; board: number[]; stake: number; call: number };
+  | { t: 'casino'; p: number; phase: 'holdem'; hole: number[]; board: number[]; stake: number; call: number }
+  /** Player-to-player free trade dialog (modules/trade.ts). Answer: `TradeOffer` or `null` to cancel. */
+  | { t: 'deal'; p: number };
 
 /** One destination of the travel dialog: city index, its name, the fare (price-indexed), whether it can be paid. */
 export interface TravelOption { map: number; mapId: number; name: string; price: number; affordable: boolean; owned: number; rivals: number; landIndex?: number }
 
 /** Turn menu answer: throw the dice, or open one of the pre-departure actions. */
-export type TurnAnswer = { dice: number } | { action: 'card' | 'tool' | 'stock' | 'trade' | 'surrender' | 'autopilot' };
+export type TurnAnswer = { dice: number } | { action: 'card' | 'tool' | 'stock' | 'trade' | 'deal' | 'surrender' | 'autopilot' };
 
 export type Answer =
   | undefined
@@ -255,7 +257,9 @@ export type Answer =
   | { tools?: number[]; store?: boolean }
   | number[]
   | { game: CasinoGame; stake: number; bet?: unknown }
-  | 'hit' | 'stand' | 'double' | 'call' | 'fold';
+  | 'hit' | 'stand' | 'double' | 'call' | 'fold'
+  | import('./modules/trade').TradeOffer
+  | null;
 
 /** Things that happened, in order, for the screen to show. */
 export type GameEvent =

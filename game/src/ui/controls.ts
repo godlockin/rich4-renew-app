@@ -16,7 +16,9 @@ export const TOOLBAR = [
   { key: 'tool', label: '道具' },
   { key: 'card', label: '卡片' },
   { key: 'trade', label: '黑市' },
+  { key: 'deal', label: '交易' },
   { key: 'stock', label: '股市' },
+  { key: 'cheat', label: '作弊' },
 ] as const;
 export type ToolbarKey = (typeof TOOLBAR)[number]['key'];
 
@@ -32,8 +34,11 @@ export class Toolbar {
       b.className = 'tb';
       b.dataset.key = t.key;
       b.title = t.label;
-      const normal = bank.art('Panel', 1, i + 1), hover = bank.art('Panel', 1, i + 12);
+      const spriteIdx = t.key === 'deal' ? 9 : t.key === 'cheat' ? 6 : i;
+      const normal = t.key === 'cheat' ? undefined : bank.art('Panel', 1, spriteIdx + 1);
+      const hover = t.key === 'cheat' ? undefined : bank.art('Panel', 1, spriteIdx + 12);
       b.innerHTML = `${normal ? `<img class="tb-n" src="${normal.src}" alt="">` : ''}${hover ? `<img class="tb-h" src="${hover.src}" alt="">` : ''}<span>${t.label}</span>`;
+      if (t.key === 'cheat') b.hidden = true;
       // Hover (mouse) plays Effect#0, pressing a cell #1 (rich4.asm:11373-11407, 11008-11024).
       b.onpointerenter = e => { if (e.pointerType === 'mouse') audio.ui('hover'); };
       b.onpointerdown = () => audio.ui('click');
@@ -44,6 +49,12 @@ export class Toolbar {
 
   /** Turn actions only work while a human decides to roll (the original's input gate, 09 §1.4). */
   setTurnOpen(open: boolean) { this.el.classList.toggle('turn-open', open); }
+
+  /** Shows or hides the single-player-only cheat button. */
+  setCheatVisible(show: boolean) {
+    const b = this.el.querySelector<HTMLButtonElement>('[data-key="cheat"]');
+    if (b) b.hidden = !show;
+  }
 }
 
 /** Dice-count slot positions in the 72×67 button by vehicle (09 §5.3): [x, y] of each slot. */
